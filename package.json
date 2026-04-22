@@ -1,0 +1,59 @@
+{
+  "name": "import-export-data",
+  "version": "5.0.0",
+  "description": "Import/export data and scheduled database backups for Strapi 5. Wraps the official `strapi export` / `strapi import` CLI and adds per-collection CSV/JSON/XLSX export, encrypted tar archives, cron-scheduled auto-backups with retention, and one-click restore — all from the admin UI.",
+  "license": "MIT",
+  "keywords": [
+    "strapi",
+    "strapi-plugin",
+    "import",
+    "export",
+    "backup",
+    "restore",
+    "csv",
+    "json",
+    "xlsx",
+    "sql",
+    "postgres",
+    "mysql",
+    "sqlite"
+  ],
+  "main": "strapi-server.js",
+  "files": [
+    "admin",
+    "server",
+    "strapi-admin.js",
+    "strapi-server.js",
+    "README.md"
+  ],
+  "author": {
+    "name": "NewProWeb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/newproweb/strapi-plugin-import-export.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@strapi/design-system": "^2.0.0",
+    "@strapi/icons": "^2.0.0",
+    "archiver": "^7.0.1",
+    "csvtojson": "^2.0.14",
+    "exceljs": "^4.4.0",
+    "pg-connection-string": "^2.7.0",
+    "prop-types": "^15.7.2",
+    "tar": "^7.4.3"
+  },
+  "engines": {
+    "node": ">=18.0.0 <=22.x.x",
+    "npm": ">=6.0.0"
+  },
+  "strapi": {
+    "name": "Import Export",
+    "description": "Unified import/export + backup plugin with SQL/GZ support, scheduled backups with retention, and per-collection allow-list.",
+    "kind": "plugin",
+    "displayName": "Import Export"
+  }
+}
