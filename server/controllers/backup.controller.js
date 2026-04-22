@@ -4,11 +4,13 @@ const fs = require("fs");
 const { PassThrough } = require("stream");
 
 const { services } = require("../helpers/plugin-services");
-const { errorBody } = require("../utils/errors");
+const { errorBody, pickStatus } = require("../utils/errors");
 const { pickMultipartFile, readableUploadPath, uploadOriginalName } = require("../helpers/multipart");
 const { pickDownloadMime } = require("../helpers/mime");
 const { buildSchedulePatch, toPublicConfig, toSavedConfig } = require("../helpers/config-shape");
 const { buildBackupCreateOpts, buildRestoreOpts } = require("../helpers/query-opts");
+const { readStrapiBodyLimit, formatBytes } = require("../helpers/body-limit");
+const { isBusy, currentLabel, current } = require("../helpers/job-mutex");
 
 const fail = (ctx, status, error, fallback) => {
   ctx.status = status;
@@ -28,7 +30,7 @@ module.exports = ({ strapi }) => ({
       ctx.body = { data: { jobId } };
     } catch (error) {
       strapi.log.error("[import-export:backup.create]", error);
-      fail(ctx, 500, error, "Backup failed to start");
+      fail(ctx, pickStatus(error, 500), error, "Backup failed to start");
     }
   },
 
@@ -64,7 +66,7 @@ module.exports = ({ strapi }) => ({
       ctx.body = { data: { jobId } };
     } catch (error) {
       strapi.log.error("[import-export:backup.restore]", error);
-      fail(ctx, 500, error, "Restore failed to start");
+      fail(ctx, pickStatus(error, 500), error, "Restore failed to start");
     }
   },
 
@@ -85,6 +87,22 @@ module.exports = ({ strapi }) => ({
     const tmpPath = readableUploadPath(file);
     if (!tmpPath) return ctx.throw(400, "uploaded file not readable");
 
+    const fileSize = Number(file.size) || 0;
+    const max = readStrapiBodyLimit();
+    if (fileSize > max) {
+      ctx.status = 413;
+      ctx.body = {
+        error: {
+          status: 413,
+          name: "PayloadTooLarge",
+          message:
+            `Archive size ${formatBytes(fileSize)} exceeds the configured Strapi body limit of ${formatBytes(max)}. `
+            + "Raise `strapi::body` formidable.maxFileSize in admin/config/middlewares.js (and the reverse-proxy client_max_body_size) and restart Strapi.",
+        },
+      };
+      return;
+    }
+
     try {
       const staged = services().backup.stageUploadedArchive(tmpPath, uploadOriginalName(file));
       strapi.log.info(`[import-export] staged uploaded archive: ${staged.file}`);
@@ -93,6 +111,19 @@ module.exports = ({ strapi }) => ({
       strapi.log.error("[import-export:backup.upload]", error);
       fail(ctx, 500, error, "Upload failed");
     }
+  },
+
+  async limits(ctx) {
+    const max = readStrapiBodyLimit();
+    ctx.body = {
+      data: {
+        maxFileSize: max,
+        maxFileSizeLabel: formatBytes(max),
+        busy: isBusy(),
+        busyLabel: currentLabel(),
+        busyJob: current(),
+      },
+    };
   },
 
   async getSchedule(ctx) {

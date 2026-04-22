@@ -1,35 +1,65 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { listJobs } from "../utils/api";
 import { isAuthError } from "../utils/auth";
-import { RUNNING_JOBS_POLL_MS } from "../constants/jobs";
+import { RUNNING_JOBS_POLL_MS, RUNNING_JOBS_IDLE_POLL_MS } from "../constants/jobs";
+
+const isVisible = () =>
+  typeof document === "undefined" || document.visibilityState !== "hidden";
 
 export const useRunningJobs = () => {
   const [runningJobs, setRunningJobs] = useState([]);
+  const timerRef = useRef(null);
+  const runningCountRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     let authLost = false;
-    let intervalId = null;
+
+    const schedule = () => {
+      if (cancelled || authLost) return;
+      const delay = runningCountRef.current > 0
+        ? RUNNING_JOBS_POLL_MS
+        : RUNNING_JOBS_IDLE_POLL_MS;
+      timerRef.current = setTimeout(pump, delay);
+    };
 
     const pump = async () => {
-      if (authLost) return;
+      if (cancelled || authLost) return;
+      if (!isVisible()) return schedule();
+
       try {
         const all = await listJobs();
         if (cancelled) return;
-        setRunningJobs((all || []).filter((j) => j.status === "running"));
+        const running = (all || []).filter((j) => j.status === "running");
+        runningCountRef.current = running.length;
+        setRunningJobs(running);
       } catch (err) {
-        if (!isAuthError(err)) return;
-        authLost = true;
-        if (intervalId) clearInterval(intervalId);
+        if (isAuthError(err)) {
+          authLost = true;
+          return;
+        }
       }
+      schedule();
+    };
+
+    const onVisibility = () => {
+      if (!isVisible()) return;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      pump();
     };
 
     pump();
-    intervalId = setInterval(pump, RUNNING_JOBS_POLL_MS);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+
     return () => {
       cancelled = true;
-      if (intervalId) clearInterval(intervalId);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
     };
   }, []);
 

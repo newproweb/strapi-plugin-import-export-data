@@ -50,6 +50,8 @@ const mergePatch = (current, patch) => ({
       : normalizeRetention(patch.retention, current.retention),
 
   autoExcludeFiles: pickBool(patch, "autoExcludeFiles", current),
+  adoptOrphans: pickBool(patch, "adoptOrphans", current),
+  preRestoreSnapshot: pickBool(patch, "preRestoreSnapshot", current),
   lastBackupAt: patch.lastBackupAt === undefined ? current.lastBackupAt : patch.lastBackupAt,
 });
 

@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { appRoot } = require("../utils/fs");
+const { recordPending, clearPending } = require("./pad-tracker");
 
 const uploadCandidates = () => {
   const root = appRoot();
@@ -73,16 +74,37 @@ const readAllUploadRows = async () => {
   }
 };
 
-const collectUrls = (row) => {
-  const urls = [];
-  if (row?.url) urls.push(row.url);
-  if (!row?.formats || typeof row.formats !== "object") return urls;
+const canonicalLocalPath = (hash, ext) => {
+  if (!hash || typeof hash !== "string") return null;
+  const safeExt = typeof ext === "string" && ext.length > 0 ? ext : "";
+  return path.join(appRoot(), "public", "uploads", `${hash}${safeExt}`);
+};
 
-  for (const variant of Object.values(row.formats)) {
-    if (variant?.url) urls.push(variant.url);
+const collectTargetPaths = (row) => {
+  const targets = new Set();
+
+  const addUrl = (url) => {
+    const full = resolveLocalUploadPath(url);
+    if (full) targets.add(full);
+  };
+
+  const addHashExt = (hash, ext) => {
+    const full = canonicalLocalPath(hash, ext);
+    if (full) targets.add(full);
+  };
+
+  if (row?.url) addUrl(row.url);
+  addHashExt(row?.hash, row?.ext);
+
+  if (row?.formats && typeof row.formats === "object") {
+    for (const variant of Object.values(row.formats)) {
+      if (!variant || typeof variant !== "object") continue;
+      if (variant.url) addUrl(variant.url);
+      addHashExt(variant.hash, variant.ext);
+    }
   }
 
-  return urls;
+  return targets;
 };
 
 const writePlaceholder = (full) => {
@@ -105,12 +127,13 @@ const padMissingUploadFiles = async (emit) => {
   }
 
   for (const row of rows) {
-    for (const url of collectUrls(row)) {
-      const full = resolveLocalUploadPath(url);
-      if (!full || fs.existsSync(full)) continue;
+    for (const full of collectTargetPaths(row)) {
+      if (fs.existsSync(full)) continue;
       if (writePlaceholder(full)) created.push(full);
     }
   }
+
+  if (created.length > 0) recordPending(created);
 
   if (!emit) return created;
   if (created.length === 0) {
@@ -128,6 +151,7 @@ const cleanupPaddedFiles = (created, emit) => {
   for (const p of created) {
     try { fs.unlinkSync(p); removed += 1; } catch { /* ignore */ }
   }
+  clearPending(created);
   if (emit) emit(`[pad] removed ${removed} placeholder file(s)`);
 };
 

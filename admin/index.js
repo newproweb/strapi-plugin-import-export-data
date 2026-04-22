@@ -1,6 +1,7 @@
 import pluginId from "./pluginId";
 import { PluginIcon } from "./components/PluginIcon.jsx";
 import ListViewActions from "./components/ListViewActions.jsx";
+import { PERMISSIONS } from "./constants/permissions";
 
 export default {
   register(app) {
@@ -26,7 +27,7 @@ export default {
             const mod = await import("./pages/HomePage.jsx");
             return mod.default;
           },
-          permissions: [],
+          permissions: PERMISSIONS.read,
         },
       ]
     );

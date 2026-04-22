@@ -6,5 +6,7 @@ module.exports = {
     encryptionKey: "",
     retention: 10,
     autoExcludeFiles: false,
+    adoptOrphans: false,
+    preRestoreSnapshot: true,
   },
 };

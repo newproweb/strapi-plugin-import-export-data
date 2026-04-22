@@ -16,8 +16,10 @@ const buildPayload = (cfg) => {
     backupSchedule: cfg.backupSchedule || "",
     retention: cfg.retention,
     autoExcludeFiles: cfg.autoExcludeFiles,
+    adoptOrphans: Boolean(cfg.adoptOrphans),
+    preRestoreSnapshot: cfg.preRestoreSnapshot !== false,
   };
-  
+
   if (typeof cfg.encryptionKey === "string" && !cfg.encryptionKey.startsWith("••")) {
     payload.encryptionKey = cfg.encryptionKey;
   }

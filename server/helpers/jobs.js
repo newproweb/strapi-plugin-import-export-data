@@ -9,10 +9,27 @@ const {
 
 const jobs = new Map();
 
+const STUCK_JOB_MS = 30 * 60 * 1000;
+
 const pruneExpiredJobs = () => {
-  const cutoff = Date.now() - JOB_TTL_MS;
+  const now = Date.now();
+  const cutoff = now - JOB_TTL_MS;
+  const stuckCutoff = now - STUCK_JOB_MS;
   for (const [id, job] of jobs) {
-    if (job.finishedAt && job.finishedAt < cutoff) jobs.delete(id);
+    if (job.finishedAt && job.finishedAt < cutoff) {
+      jobs.delete(id);
+      continue;
+    }
+    if (job.status === "running" && !job.finishedAt) {
+      const lastActivity = job.logLines.length
+        ? job.logLines[job.logLines.length - 1].at
+        : job.startedAt;
+      if (lastActivity < stuckCutoff) {
+        job.status = "error";
+        job.error = "Job marked as stuck — no progress for 15 minutes (likely left over from a crashed process).";
+        job.finishedAt = now;
+      }
+    }
   }
 };
 
@@ -42,6 +59,26 @@ const matchStageDone = (job, line) => {
   return true;
 };
 
+const matchStageProgress = (job, line) => {
+  // Matches Strapi CLI spinner output like:
+  //   - assets: 1234 transferred (size: 15 MB) (elapsed: 9500 ms) (1.6 MB/s)
+  //   ✔ entities: 22904 transferred (size: 26 MB) (elapsed: 23141 ms) (1.1 MB/s)
+  const m = line.match(/(\w+):\s+(\d+)\s+transferred\s+\(size:\s*([\d.]+)\s*([KMGT]?B)\)(?:\s+\(elapsed:\s*(\d+)\s*ms\))?(?:\s+\(([\d.]+)\s*([KMGT]?B)\/s\))?/i);
+  if (!m) return false;
+  const name = m[1].toLowerCase();
+  if (!KNOWN_STAGES.includes(name)) return false;
+  const count = Number(m[2]);
+  const sizeVal = m[3];
+  const sizeUnit = m[4];
+  const rate = m[6] ? `${m[6]} ${m[7]}/s` : "";
+  const stageLabel = `${name}: ${count.toLocaleString()} transferred (${sizeVal} ${sizeUnit}${rate ? ", " + rate : ""})`;
+  job.progress = {
+    percent: Math.max(job.progress?.percent || 0, stagePercent(job.stagesDone)),
+    stage: stageLabel,
+  };
+  return true;
+};
+
 const matchStageStarted = (job, line) => {
   const started = line.match(/^-\s+(\w+)\s*:/);
   if (!started) return false;
@@ -65,6 +102,7 @@ const updateProgressFromLine = (job, line) => {
   if (!job.stagesDone) job.stagesDone = new Set();
   if (matchPercent(job, line)) return;
   if (matchStageDone(job, line)) return;
+  if (matchStageProgress(job, line)) return;
   if (matchStageStarted(job, line)) return;
   matchCompletion(job, line);
 };

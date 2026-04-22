@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const { appRoot } = require("../utils/fs");
 
@@ -63,9 +64,15 @@ const collectKnownBasenames = (rows) => {
   return known;
 };
 
+const sanitizeHashBase = (base) =>
+  base.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "file";
+
+const randomSuffix = () => crypto.randomBytes(5).toString("hex");
+
 const buildUploadRow = (filename, fullPath) => {
   const ext = path.extname(filename);
-  const hash = path.basename(filename, ext);
+  const base = path.basename(filename, ext);
+  const hash = `${sanitizeHashBase(base)}_${randomSuffix()}`;
   const stat = fs.statSync(fullPath);
   const sizeKb = Number((stat.size / 1024).toFixed(2));
 

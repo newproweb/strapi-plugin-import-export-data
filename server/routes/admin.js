@@ -1,13 +1,21 @@
 "use strict";
 
-const ADMIN_POLICIES = ["admin::isAuthenticatedAdmin"];
+const { actionUid } = require("../constants/permissions");
 
-const route = (method, path, handler, extra = {}) => ({
+const requirePermission = (actionKey) => ({
+  name: "admin::hasPermissions",
+  config: { actions: [actionUid(actionKey)] },
+});
+
+const route = (method, path, handler, actionKey, extra = {}) => ({
   method,
   path,
   handler,
   config: {
-    policies: ADMIN_POLICIES,
+    policies: [
+      "admin::isAuthenticatedAdmin",
+      ...(actionKey ? [requirePermission(actionKey)] : []),
+    ],
     ...extra,
   },
 });
@@ -15,29 +23,34 @@ const route = (method, path, handler, extra = {}) => ({
 module.exports = {
   type: "admin",
   routes: [
-    // Schema + locales 
-    route("GET", "/content-types", "schemaController.listCollections"),
-    route("GET", "/content-types/:uid", "schemaController.getCollection"),
-    route("GET", "/locales", "schemaController.getLocales"),
+    // Schema + locales — any user with plugin read access
+    route("GET", "/content-types", "schemaController.listCollections", "read"),
+    route("GET", "/content-types/:uid", "schemaController.getCollection", "read"),
+    route("GET", "/locales", "schemaController.getLocales", "read"),
 
-    // collection export/import 
-    route("GET", "/export", "exportController.exportData"),
-    route("GET", "/preview", "exportController.preview"),
-    route("POST", "/import", "importController.importData"),
+    // Per-collection export/import
+    route("GET", "/export", "exportController.exportData", "collectionExport"),
+    route("GET", "/preview", "exportController.preview", "collectionExport"),
+    route("POST", "/import", "importController.importData", "collectionImport"),
 
-    // Strapi-CLI-backed database backups.
-    route("GET", "/backup", "backupController.list"),
-    route("POST", "/backup", "backupController.create"),
+    // Strapi-CLI-backed database backups
+    route("GET", "/backup", "backupController.list", "read"),
+    route("POST", "/backup", "backupController.create", "create"),
+    route("GET", "/backup/limits", "backupController.limits", "read"),
 
-    // Job status routes
-    route("GET", "/backup/jobs", "backupController.jobList"),
-    route("GET", "/backup/job/:id", "backupController.jobStatus"),
-    route("DELETE", "/backup/:file", "backupController.remove"),
-    route("GET", "/backup/:file/download", "backupController.download"),
-    route("POST", "/backup/:file/restore", "backupController.restore"),
-    route("POST", "/backup/upload", "backupController.upload"),
-    route("POST", "/backup/run-now", "backupController.runNow"),
-    route("GET", "/backup-schedule", "backupController.getSchedule"),
-    route("POST", "/backup-schedule", "backupController.saveSchedule"),
+    // Job status routes (any user with read)
+    route("GET", "/backup/jobs", "backupController.jobList", "read"),
+    route("GET", "/backup/job/:id", "backupController.jobStatus", "read"),
+
+    // Destructive actions — require individual permissions
+    route("DELETE", "/backup/:file", "backupController.remove", "delete"),
+    route("GET", "/backup/:file/download", "backupController.download", "download"),
+    route("POST", "/backup/:file/restore", "backupController.restore", "restore"),
+    route("POST", "/backup/upload", "backupController.upload", "restore"),
+    route("POST", "/backup/run-now", "backupController.runNow", "create"),
+
+    // Schedule/settings
+    route("GET", "/backup-schedule", "backupController.getSchedule", "read"),
+    route("POST", "/backup-schedule", "backupController.saveSchedule", "settings"),
   ],
 };

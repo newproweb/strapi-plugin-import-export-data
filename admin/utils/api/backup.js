@@ -41,3 +41,9 @@ export const uploadBackup = async (file, { key = "" } = {}) => {
   const { data } = await post(`${basePath}/backup/upload`, form);
   return data?.data;
 };
+
+export const getBackupLimits = async () => {
+  const { get } = getFetchClient();
+  const { data } = await get(`${basePath}/backup/limits`);
+  return data?.data ?? { maxFileSize: 0, busy: false };
+};

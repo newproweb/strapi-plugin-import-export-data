@@ -2,8 +2,8 @@
 
 module.exports = {
   MAX_LOG_LINES: 300,
-  JOB_TTL_MS: 30 * 60 * 1000,
-  CLI_TIMEOUT_MS: 30 * 60 * 1000,
+  JOB_TTL_MS: 60 * 60 * 1000,
+  CLI_TIMEOUT_MS: 2 * 60 * 60 * 1000,
   KNOWN_STAGES: ["schemas", "entities", "links", "assets", "configuration"],
   COMPLETION_MARKERS: [
     /transfer completed/i,

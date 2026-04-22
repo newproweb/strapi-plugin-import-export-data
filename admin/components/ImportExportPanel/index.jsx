@@ -3,8 +3,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useNotification } from "@strapi/strapi/admin";
 import { Box, Flex } from "@strapi/design-system";
 
-import { listBackups } from "../../utils/api";
-import { readServerError } from "../../utils/format";
+import { listBackups, getBackupLimits } from "../../utils/api";
+import { readServerError, formatBytes } from "../../utils/format";
 import { useRunningJobs } from "../../hooks/useRunningJobs";
 
 import DbExportModal from "../DbExportModal";
@@ -31,13 +31,16 @@ const ImportExportPanel = () => {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadKey, setUploadKey] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [limits, setLimits] = useState({ maxFileSize: 0, busy: false, maxFileSizeLabel: "" });
 
   const notify = toggleNotification;
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      setRows(await listBackups());
+      const [backups, lim] = await Promise.all([listBackups(), getBackupLimits().catch(() => null)]);
+      setRows(backups);
+      if (lim) setLimits(lim);
     } catch (e) {
       notify({ type: "danger", message: readServerError(e) });
     } finally {
@@ -46,6 +49,27 @@ const ImportExportPanel = () => {
   }, [notify]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const assertUploadable = (file) => {
+    if (!file) return false;
+    if (limits.maxFileSize && file.size > limits.maxFileSize) {
+      notify({
+        type: "danger",
+        message:
+          `Archive is ${formatBytes(file.size)} — exceeds configured Strapi body limit of ${limits.maxFileSizeLabel || formatBytes(limits.maxFileSize)}. `
+          + "Raise strapi::body formidable.maxFileSize in admin/config/middlewares.js (and reverse-proxy client_max_body_size) and restart Strapi.",
+      });
+      return false;
+    }
+    if (limits.busy) {
+      notify({
+        type: "warning",
+        message: `Another ${limits.busyLabel || "backup"} job is running — wait for it to finish before starting a new import.`,
+      });
+      return false;
+    }
+    return true;
+  };
 
   const resetUpload = () => {
     setUploadFile(null);
@@ -95,6 +119,7 @@ const ImportExportPanel = () => {
 
   const onStage = async () => {
     if (!uploadFile) return warnMissingFile();
+    if (!assertUploadable(uploadFile)) return;
     setWorking(true);
     try {
       await stageUpload(uploadFile, uploadKey, { notify, reload, reset: resetUpload });
@@ -108,6 +133,7 @@ const ImportExportPanel = () => {
   const onImport = async () => {
     if (!uploadFile) return warnMissingFile();
     if (uploadFile.name.endsWith(".enc") && !uploadKey.trim()) return warnMissingKey();
+    if (!assertUploadable(uploadFile)) return;
     setWorking(true);
     try {
       const jobId = await importUpload(uploadFile, uploadKey, { notify, reload });
@@ -146,6 +172,7 @@ const ImportExportPanel = () => {
           encryptionKey={uploadKey}
           dragOver={dragOver}
           working={working}
+          limits={limits}
           onFile={setUploadFile}
           onKey={setUploadKey}
           onDragOver={onDragOver}

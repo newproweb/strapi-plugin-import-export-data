@@ -31,11 +31,27 @@ const emitLine = (stream, line, onLog) => {
   }
 };
 
-const streamChunk = (buf, stream, onLog, sink) => {
+const streamChunk = (buf, stream, onLog, sink, state) => {
   const text = buf.toString();
   sink.append(stream, text);
   const lines = text.split(/[\r\n]+/).filter((l) => l.trim());
-  for (const line of lines) emitLine(stream, line, onLog);
+  for (const line of lines) {
+    if (state.last === line) continue; // skip spinner redraws of same line
+    state.last = line;
+    state.lastAt = Date.now();
+    emitLine(stream, line, onLog);
+  }
+};
+
+const HEARTBEAT_MS = 30 * 1000;
+
+const emitHeartbeat = (child, state, onLog) => {
+  if (!child || child.killed || child.exitCode !== null) return;
+  const idleMs = Date.now() - (state.lastAt || state.startedAt);
+  if (idleMs < HEARTBEAT_MS) return;
+  const idleSec = Math.round(idleMs / 1000);
+  const msg = `[heartbeat] strapi CLI (pid ${child.pid}) still running — no new output for ${idleSec}s (last: "${state.last || "spawn"}")`;
+  emitLine("stdout", msg, onLog);
 };
 
 const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog } = {}) =>
@@ -60,22 +76,27 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog } = {}) =>
       stderr: "",
       append(stream, text) { this[stream] += text; },
     };
+    const state = { last: "", lastAt: Date.now(), startedAt: Date.now() };
 
     const timer = setTimeout(() => {
       try { child.kill("SIGKILL"); } catch { /* noop */ }
       reject(new Error(`strapi ${args[0]} timed out after ${Math.round(timeoutMs / 1000)}s`));
     }, timeoutMs);
 
-    child.stdout.on("data", (buf) => streamChunk(buf, "stdout", onLog, sink));
-    child.stderr.on("data", (buf) => streamChunk(buf, "stderr", onLog, sink));
+    const heartbeat = setInterval(() => emitHeartbeat(child, state, onLog), HEARTBEAT_MS);
+
+    child.stdout.on("data", (buf) => streamChunk(buf, "stdout", onLog, sink, state));
+    child.stderr.on("data", (buf) => streamChunk(buf, "stderr", onLog, sink, state));
 
     child.on("error", (err) => {
       clearTimeout(timer);
+      clearInterval(heartbeat);
       reject(err);
     });
 
     child.on("exit", (code) => {
       clearTimeout(timer);
+      clearInterval(heartbeat);
       if (code === 0) {
         resolve({ code, stdout: sink.stdout, stderr: sink.stderr });
         return;

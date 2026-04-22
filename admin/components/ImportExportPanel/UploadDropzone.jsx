@@ -3,11 +3,14 @@ import React from "react";
 import { Box, Flex, Button, Typography, Field, TextInput } from "@strapi/design-system";
 import { Upload } from "@strapi/icons";
 
+import { formatBytes } from "../../utils/format";
+
 const UploadDropzone = ({
   file,
   encryptionKey,
   dragOver,
   working,
+  limits,
   onFile,
   onKey,
   onDragOver,
@@ -17,6 +20,10 @@ const UploadDropzone = ({
   onImport,
 }) => {
   const isEncrypted = file?.name?.endsWith(".enc");
+  const maxBytes = Number(limits?.maxFileSize) || 0;
+  const maxLabel = limits?.maxFileSizeLabel || (maxBytes ? formatBytes(maxBytes) : "");
+  const tooBig = Boolean(maxBytes && file && file.size > maxBytes);
+  const busy = Boolean(limits?.busy);
 
   return (
     <Box
@@ -63,20 +70,40 @@ const UploadDropzone = ({
 
         {file && (
           <Flex gap={2} wrap="wrap" justifyContent="center">
-            <Button variant="tertiary" onClick={onStage} disabled={working}>Save only</Button>
+            <Button variant="tertiary" onClick={onStage} disabled={working || tooBig || busy}>Save only</Button>
             <Button
               variant="default"
               startIcon={<Upload />}
               onClick={onImport}
               loading={working}
-              disabled={working}
+              disabled={working || tooBig || busy}
             >
               Import &amp; seed
             </Button>
           </Flex>
         )}
 
-        {file && (
+        {file && tooBig && (
+          <Typography variant="pi" textColor="danger600" textAlign="center">
+            Archive is {formatBytes(file.size)} — exceeds Strapi body limit of {maxLabel}.
+            Raise <code>strapi::body</code> formidable.maxFileSize and the reverse-proxy
+            <code>client_max_body_size</code>, then restart Strapi.
+          </Typography>
+        )}
+
+        {busy && (
+          <Typography variant="pi" textColor="warning600" textAlign="center">
+            A {limits?.busyLabel || "backup"} job is currently running — wait for it to finish.
+          </Typography>
+        )}
+
+        {maxLabel && !tooBig && (
+          <Typography variant="pi" textColor="neutral500" textAlign="center">
+            Max archive size: {maxLabel}
+          </Typography>
+        )}
+
+        {file && !tooBig && (
           <Typography variant="pi" textColor="warning600" textAlign="center">
             "Import &amp; seed" wipes current DB and uploads, then replays
             {" "}<code>strapi import --file … --force</code>.

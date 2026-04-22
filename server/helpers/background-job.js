@@ -1,7 +1,7 @@
 "use strict";
 
 const { makeJob, pushLog } = require("./jobs");
-const { acquire, release } = require("./job-mutex");
+const { acquire, release, isBusy, currentLabel, current } = require("./job-mutex");
 
 const markSuccess = (job, result) => {
   job.result = result;
@@ -16,8 +16,18 @@ const markFailure = (job, type, err) => {
 };
 
 const runInBackground = (type, operation) => {
+  if (isBusy()) {
+    const busy = current();
+    const err = new Error(
+      `Another ${currentLabel()} job is already running (id=${busy?.jobId}) — wait for it to finish or cancel it before starting ${type}.`,
+    );
+    err.status = 409;
+    throw err;
+  }
+
   const job = makeJob(type);
   acquire(type, job.id);
+
   (async () => {
     try {
       const result = await operation((evt) => pushLog(job, evt));

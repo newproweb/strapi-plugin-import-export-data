@@ -156,6 +156,73 @@ when the schedule is active and red when it is off — one click toggles it.
 
 ---
 
+## Production safety
+
+This plugin wipes and replaces the DB on import/restore, so every risky
+operation has a built-in safeguard. Most of these you do **not** need to
+touch — they run automatically once you restart Strapi after the upgrade.
+
+### 1. Concurrent-job mutex
+
+Only one export / import / restore can run at a time. While any job is
+running, the UI disables the **Import & seed** and **Save only** buttons
+and shows a banner identifying the running job. The server also returns
+`409 Conflict` if a second job is started via the API.
+
+### 2. Archive validation
+
+Every archive is validated before import:
+
+- existence + extension whitelist (`.tar`, `.tar.gz`, `.tar.enc`, `.tar.gz.enc`)
+- minimum size (≥ 1 KB — rejects truncated / empty uploads)
+- `tar -t` integrity check on non-encrypted archives (corrupt or
+  path-traversal archives fail here)
+
+### 3. Pre-restore auto-snapshot
+
+Before **every** import/restore, the plugin first creates a
+`pre-restore-<timestamp>.tar.gz` archive. If the imported archive turns
+out to be bad, open the **Import / Export** tab and restore the
+`pre-restore-*` entry to roll back.
+
+You can disable this in **Settings → Auto-snapshot before restore** if
+you accept the risk. Kept **on** by default.
+
+### 4. Orphan-adopt is opt-in
+
+Strapi CLI only bundles files that have a `plugin::upload.file` row.
+If you have uploads on disk that were put there manually (e.g. a Docker
+volume copy), turn on **Settings → Adopt orphan uploads before export**.
+
+The orphan rows are **permanent** — they stay in the DB after export and
+will appear in the Media Library. For that reason the option is **off by
+default**.
+
+### 5. Body-size pre-check
+
+The UI fetches the server's configured `formidable.maxFileSize` on load
+and disables the import buttons if the dropped archive exceeds it,
+showing a clear message instead of the generic HTML-413 error. See
+[Raise the body-size limit](#raise-the-body-size-limit-important-for-uploads)
+to raise the limit at both the Strapi and the reverse-proxy layers.
+
+### 6. Pad-placeholder crash recovery
+
+During export the plugin writes 0-byte placeholders for missing upload
+files (so the CLI does not crash on `ENOENT`). If the Strapi process is
+killed mid-export (`SIGKILL`, OOM, container restart), these empty files
+would normally stay on disk and corrupt the Media Library. The plugin
+tracks them in `data/backups/.pending-pad.json` and cleans them up on
+next boot.
+
+### 7. Upload-hash collisions
+
+Orphan-adopt now assigns each row a Strapi-style
+`<basename>_<random10>` hash to avoid hitting the unique constraint on
+`upload_files.hash` when two files on disk happen to share a basename.
+
+---
+
 ## Storage
 
 Archives live under `<strapi-root>/data/backups/`. Plugin settings are
@@ -165,12 +232,42 @@ Add `data/backups/` to `.gitignore`.
 
 ---
 
-## Permissions
+## Permissions (Role-Based ACL)
 
-All routes are admin-only. The plugin reuses the Content Manager's
-permission checker, so per-collection export/import requires the
-corresponding `read` / `create` / `update` permission on the target
-content type.
+Every route and every UI entry point is gated by a dedicated plugin
+action. Assign them in **Settings → Administration Panel → Roles →
+\<role\> → Plugins → Import Export Data**. Users without the required
+action **do not see** the corresponding UI at all — the settings link,
+the tabs inside the plugin, and the per-collection Import / Export
+buttons in the Content Manager all disappear.
+
+| Action UID                                     | Grants                                                               |
+| ---------------------------------------------- | -------------------------------------------------------------------- |
+| `plugin::import-export-data.read`              | Open the plugin page, list backups, view job status                  |
+| `plugin::import-export-data.create`            | Create a new backup / run the schedule now                           |
+| `plugin::import-export-data.restore`           | **Destructive** — restore an archive, upload a new archive           |
+| `plugin::import-export-data.delete`            | Delete an archive from the list                                      |
+| `plugin::import-export-data.download`          | Download an archive to the local machine                             |
+| `plugin::import-export-data.settings`          | View/save the schedule, encryption key, retention and safety toggles |
+| `plugin::import-export-data.collection.export` | Show the **Export** menu in the Content Manager list view            |
+| `plugin::import-export-data.collection.import` | Show the **Import** button in the Content Manager list view          |
+
+Per-collection export/import additionally reuses the Content Manager's
+own permission checker, so the user must still have `read` (for export)
+or `create` / `update` (for import) on the target content type.
+
+### Suggested role presets
+
+- **Viewer** — `read` only. Can open the plugin and see what exists.
+- **Operator** — `read`, `create`, `download`, `collection.export`,
+  `collection.import`. Can back up and move data around but cannot
+  restore or delete.
+- **Admin** — all eight actions.
+
+Newly-introduced actions must be registered with Strapi before they
+appear in the role editor. The plugin does this automatically in its
+`register` lifecycle on every boot, so no manual step is required after
+upgrading.
 
 ---
 

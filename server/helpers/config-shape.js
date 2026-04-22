@@ -18,6 +18,8 @@ const buildSchedulePatch = (body) => {
   }
   assignIfDefined(patch, body, "retention");
   assignIfDefined(patch, body, "autoExcludeFiles", Boolean);
+  assignIfDefined(patch, body, "adoptOrphans", Boolean);
+  assignIfDefined(patch, body, "preRestoreSnapshot", Boolean);
   return patch;
 };
 
@@ -29,6 +31,8 @@ const toPublicConfig = (cfg) => ({
   encryptionKeySet: Boolean(cfg.encryptionKey),
   retention: cfg.retention,
   autoExcludeFiles: cfg.autoExcludeFiles,
+  adoptOrphans: Boolean(cfg.adoptOrphans),
+  preRestoreSnapshot: cfg.preRestoreSnapshot !== false,
   lastBackupAt: cfg.lastBackupAt || null,
 });
 

@@ -67,6 +67,27 @@ const ScheduleSection = ({ cfg, onField }) => {
         >
           Exclude uploaded files from auto-backups (faster, smaller archive)
         </Checkbox>
+
+        <Checkbox
+          checked={Boolean(cfg.adoptOrphans)}
+          onCheckedChange={(v) => onField("adoptOrphans", Boolean(v))}
+        >
+          Adopt orphan upload files before export (include files on disk that have no plugin::upload.file row)
+        </Checkbox>
+        <Typography variant="pi" textColor="neutral500">
+          Off by default. Turning it on inserts one row per orphan file so <code>strapi export</code> bundles them.
+          The rows are permanent — they remain in the DB after export and will appear in the Media Library.
+        </Typography>
+
+        <Checkbox
+          checked={cfg.preRestoreSnapshot !== false}
+          onCheckedChange={(v) => onField("preRestoreSnapshot", Boolean(v))}
+        >
+          Auto-snapshot before restore/import (recommended)
+        </Checkbox>
+        <Typography variant="pi" textColor="neutral500">
+          Before every import or restore, create a <code>pre-restore-*.tar.gz</code> archive so a bad import can be rolled back.
+        </Typography>
       </Flex>
     </Box>
   );

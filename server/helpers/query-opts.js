@@ -36,12 +36,14 @@ const buildBackupCreateOpts = (body, cfg) => {
     key: encrypt ? (body.key || cfg.encryptionKey || undefined) : undefined,
     exclude: body.exclude || undefined,
     prefix: body.prefix || "export",
+    adoptOrphans: body.adoptOrphans === undefined ? Boolean(cfg.adoptOrphans) : isTruthy(body.adoptOrphans),
   };
 };
 
 const buildRestoreOpts = (body, cfg) => ({
   key: body.key || cfg.encryptionKey || undefined,
   exclude: body.exclude || undefined,
+  preRestoreSnapshot: body.preRestoreSnapshot === undefined ? cfg.preRestoreSnapshot !== false : isTruthy(body.preRestoreSnapshot),
 });
 
 module.exports = {
