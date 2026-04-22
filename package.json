@@ -26,12 +26,16 @@
     "strapi-server.js",
     "README.md"
   ],
-  "author": {
-    "name": "NewProWeb"
-  },
+  "authors": [
+    {
+      "name": "NewProWeb <Aliev Davlatbek>",
+      "emails":[ "davlatbek.mamurjonov@newproweb.com", "alievdavlat024@gmail.com"],
+      "url": "https://github.com/alievdavlat/alievdavlat"
+    }
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/newproweb/strapi-plugin-import-export.git"
+    "url": "https://github.com/newproweb/strapi-plugin-import-export-data.git"
   },
   "publishConfig": {
     "access": "public"
