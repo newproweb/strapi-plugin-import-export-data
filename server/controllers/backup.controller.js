@@ -72,7 +72,26 @@ module.exports = ({ strapi }) => ({
 
   async jobStatus(ctx) {
     const job = services().backup.getJob(ctx.params.id);
-    if (!job) return ctx.throw(404, "Job not found");
+    if (!job) {
+      // Use a plain 404 response instead of `ctx.throw` — the job map is
+      // in-memory, so a missing job just means the Strapi process was
+      // restarted between the restore start and this poll. We don't want
+      // Koa's error middleware to log a full stack trace for every poll;
+      // the frontend already handles this status and stops polling.
+      ctx.status = 404;
+      ctx.body = {
+        error: {
+          status: 404,
+          name: "JobNotFound",
+          message:
+            "Job not found — the Strapi process was likely restarted since the job started. "
+            + "The import/export CLI child process was killed with the parent; "
+            + "check the backup list to see the final state.",
+          code: "JOB_NOT_FOUND",
+        },
+      };
+      return;
+    }
     ctx.body = { data: job };
   },
 

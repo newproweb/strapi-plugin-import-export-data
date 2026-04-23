@@ -98,12 +98,54 @@ const matchCompletion = (job, line) => {
   return true;
 };
 
+// Animates the progress bar while the `assets` stage is running. The
+// Strapi CLI emits `- assets: 0 transferred` once at stage start and then
+// nothing else until `✔ assets: N transferred` when the stage is done —
+// leaving the bar frozen at the stage-start percent for 10+ minutes on
+// large asset sets. Our own asset-progress monitor, on the other hand,
+// reports the live file count in `./uploads/` every couple of seconds:
+//   [assets-progress] uploads/ = 596 file(s), 13.6 MB (+59 since last tick)
+// We hook into that line to advance the percent smoothly within the
+// assets stage's percent band.
+//
+// Since we don't know the final asset total up-front, we use an asymptotic
+// curve `fraction = 1 - 1/(1 + count/1000)` that approaches the next stage
+// boundary as count grows but never overshoots it (the `- 1` keeps a 1%
+// gap so the CLI's real `✔ assets:` line can still register the jump).
+const matchAssetMonitorProgress = (job, line) => {
+  const m = line.match(/\[assets-progress\]\s+uploads\/\s*=\s*(\d+)\s+file\(s\)(?:,\s*([\d.]+\s*[KMGT]?B))?/i);
+  if (!m) return false;
+
+  // Only animate the bar once the CLI has actually announced the assets
+  // stage (`matchStageStarted` sets the label to "Working on assets…").
+  // Before that, our monitor can still emit lines for the pre-transfer
+  // deletion work, where the file count doesn't map to real progress.
+  if (!/assets/i.test(job.progress?.stage || "")) return true;
+
+  const count = Number(m[1]);
+  const sizeLabel = m[2] || "";
+
+  const fraction = 1 - 1 / (1 + count / 1000);
+  const stageSpan = 100 / KNOWN_STAGES.length;
+  const stageBase = (job.stagesDone?.size || 0) * stageSpan;
+  const withinStagePercent = Math.round(
+    Math.min(stageBase + stageSpan - 1, stageBase + fraction * stageSpan),
+  );
+
+  job.progress = {
+    percent: Math.max(job.progress?.percent || 0, withinStagePercent),
+    stage: `assets: ${count.toLocaleString()} file(s)${sizeLabel ? ` (${sizeLabel})` : ""}`,
+  };
+  return true;
+};
+
 const updateProgressFromLine = (job, line) => {
   if (!job.stagesDone) job.stagesDone = new Set();
   if (matchPercent(job, line)) return;
   if (matchStageDone(job, line)) return;
   if (matchStageProgress(job, line)) return;
   if (matchStageStarted(job, line)) return;
+  if (matchAssetMonitorProgress(job, line)) return;
   matchCompletion(job, line);
 };
 

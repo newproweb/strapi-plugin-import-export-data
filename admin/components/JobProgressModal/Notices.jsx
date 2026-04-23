@@ -20,6 +20,19 @@ export const AuthLostNotice = () => (
   </Notice>
 );
 
+export const JobLostNotice = () => (
+  <Notice background="warning100" textColor="warning700">
+    This job is no longer tracked on the server — the Strapi process was
+    restarted since the job started, so the CLI child was killed and the
+    in-memory job registry was cleared. In <code>strapi develop</code> mode
+    this usually happens because chokidar reloaded when a backup archive
+    was written. Add <code>watchIgnoreFiles: ["**/data/backups/**"]</code>
+    to <code>admin/config/admin.js</code> and restart, then retry.
+    Meanwhile, refresh the Import/Export page to see the current state of
+    your backups.
+  </Notice>
+);
+
 export const SuccessNotice = ({ job }) => (
   <Notice background="success100" textColor="success700">
     {job.type === "export"

@@ -7,6 +7,9 @@ const { backupDir, ensureBackupDir, isoSlug, resolveExportedPath } = require("..
 const { runStrapiCli } = require("../helpers/cli");
 const { getJob, listJobs } = require("../helpers/jobs");
 const { takeAuthSnapshot, replayAuthSnapshot } = require("../helpers/auth-snapshot");
+const { startLiveAuthPatcher } = require("../helpers/live-auth-patcher");
+const { autoRollbackFromSnapshot } = require("../helpers/auto-rollback");
+const { assertDevConfig } = require("../helpers/dev-config-check");
 const { padMissingUploadFiles, cleanupPaddedFiles, summarizeUploads } = require("../helpers/uploads");
 const { adoptOrphanUploads } = require("../helpers/orphan-adopt");
 const { emitExportDiagnostics } = require("../helpers/diagnostics");
@@ -168,16 +171,36 @@ const restoreBackup = async (
   }
 
   const snapshot = preserveAuth ? await takeAuthSnapshot(emit) : null;
+  const patcher = startLiveAuthPatcher(snapshot, emit);
+
   const started = Date.now();
   const excludesFiles = /\bfiles\b/.test(String(exclude || ""));
   const monitor = excludesFiles ? null : startAssetProgressMonitor(emit);
+
   let result;
   try {
-    result = await runStrapiCli(buildImportArgs({ filePath, key, exclude }), { onLog });
+    try {
+      result = await runStrapiCli(buildImportArgs({ filePath, key, exclude }), { onLog });
+    } catch (cliErr) {
+      emit(`[safeguard] import CLI failed: ${cliErr.message}`);
+      // Stop the patcher before starting the rollback CLI so they don't
+      // race each other on the same auth tables.
+      patcher.stop();
+      if (preSnapshot) {
+        await autoRollbackFromSnapshot(preSnapshot, emit, onLog);
+      } else {
+        emit(`[safeguard] WARNING: no pre-snapshot available — DB may be in a partial state, manual recovery needed`);
+      }
+      throw cliErr;
+    }
   } finally {
+    patcher.stop();
     if (monitor) monitor.stop();
+    // Always re-apply the auth snapshot, whether the CLI succeeded, failed,
+    // or failed-then-rolled-back. `replayAuthSnapshot` is internally safe
+    // (logs its own errors, never throws), so this runs unguarded.
+    if (snapshot) await replayAuthSnapshot(snapshot, emit);
   }
-  await replayAuthSnapshot(snapshot, emit);
 
   return {
     file: fileName,
@@ -189,9 +212,20 @@ const restoreBackup = async (
   };
 };
 
-const createBackupJob = (options = {}) => runInBackground(JOB_TYPES.EXPORT, (onLog) => createBackup(options, onLog));
+const createBackupJob = (options = {}) => {
+  // Pre-flight: in `strapi develop` we must ensure chokidar isn't watching
+  // the backup dir, otherwise writing the archive mid-job will auto-restart
+  // Strapi and kill the CLI. Throws HTTP 412 synchronously before we spawn
+  // anything so the user sees a clear, actionable error instead of a
+  // broken job that dies silently.
+  assertDevConfig();
+  return runInBackground(JOB_TYPES.EXPORT, (onLog) => createBackup(options, onLog));
+};
 
-const restoreBackupJob = (fileName, options = {}) => runInBackground(JOB_TYPES.IMPORT, (onLog) => restoreBackup(fileName, options, onLog));
+const restoreBackupJob = (fileName, options = {}) => {
+  assertDevConfig();
+  return runInBackground(JOB_TYPES.IMPORT, (onLog) => restoreBackup(fileName, options, onLog));
+};
 
 module.exports = () => ({
   backupDir,

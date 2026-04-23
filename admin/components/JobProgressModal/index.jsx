@@ -10,7 +10,7 @@ import ProgressBar from "./ProgressBar";
 import LogPanel from "./LogPanel";
 import StatusBadge from "./StatusBadge";
 import {
-  TransferCompleteNotice, AuthLostNotice, SuccessNotice, ErrorNotice,
+  TransferCompleteNotice, AuthLostNotice, JobLostNotice, SuccessNotice, ErrorNotice,
 } from "./Notices";
 
 const LIVE_LINE_STYLE = {
@@ -50,7 +50,7 @@ const useElapsed = (job) => {
 };
 
 const JobProgressModal = ({ jobId, type = "export", onClose, onDone }) => {
-  const { job, authLost } = useJobPolling(jobId, onDone);
+  const { job, authLost, jobLost } = useJobPolling(jobId, onDone);
   const elapsedMs = useElapsed(job);
 
   const { title, verb } = JOB_TITLES[type] || JOB_TITLES.export;
@@ -114,6 +114,7 @@ const JobProgressModal = ({ jobId, type = "export", onClose, onDone }) => {
 
             {isRunning && transferComplete && <TransferCompleteNotice />}
             {authLost && <AuthLostNotice />}
+            {jobLost && <JobLostNotice />}
 
             <LogPanel lines={job?.recentLines || []} />
 
