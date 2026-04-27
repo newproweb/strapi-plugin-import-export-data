@@ -5,7 +5,7 @@ import {
 } from "@strapi/design-system";
 import { Download, Trash, File } from "@strapi/icons";
 
-import { formatBytes, formatDate, originOf } from "../../utils/format";
+import { formatBytes, formatBytesExact, formatDate, originOf } from "../../utils/format";
 
 const FlagBadges = ({ row }) => (
   <Flex gap={2} wrap="wrap">
@@ -72,7 +72,9 @@ const BackupTable = ({ rows, loading, working, onReload, onDownload, onRestore, 
                 <Badge backgroundColor="neutral150" textColor="neutral700">{originOf(row.file)}</Badge>
               </Td>
               <Td><FlagBadges row={row} /></Td>
-              <Td><Typography>{formatBytes(row.size)}</Typography></Td>
+              <Td>
+                <Typography title={formatBytesExact(row.size)}>{formatBytes(row.size)}</Typography>
+              </Td>
               <Td>
                 <RowActions
                   file={row.file}

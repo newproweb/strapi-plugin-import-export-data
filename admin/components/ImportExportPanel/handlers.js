@@ -17,6 +17,14 @@ export const downloadAction = async (file, { notify }) => {
   try {
     const response = await downloadBackup(file);
     const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+    if (!blob.size) {
+      // Belt-and-braces guard: if the response somehow arrives empty,
+      // surface a clear error instead of silently saving a 0 KB archive.
+      throw new Error(
+        "Server returned an empty response — the download stream was truncated. "
+        + "Check the Strapi logs for [import-export:backup.download] errors and retry.",
+      );
+    }
     downloadBlob(blob, file);
   } catch (e) {
     notify({ type: "danger", message: readServerError(e) });

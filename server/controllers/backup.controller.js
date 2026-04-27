@@ -1,7 +1,6 @@
 "use strict";
 
 const fs = require("fs");
-const { PassThrough } = require("stream");
 
 const { services } = require("../helpers/plugin-services");
 const { errorBody, pickStatus } = require("../utils/errors");
@@ -43,16 +42,35 @@ module.exports = ({ strapi }) => ({
   },
 
   async download(ctx) {
+    let filePath;
+    let stats;
     try {
-      const filePath = services().backup.getBackupPath(ctx.params.file);
-      ctx.set("Content-Type", pickDownloadMime(ctx.params.file));
-      ctx.set("Content-Disposition", `attachment; filename="${ctx.params.file}"`);
-      const stream = new PassThrough();
-      ctx.body = stream;
-      fs.createReadStream(filePath).pipe(stream);
+      filePath = services().backup.getBackupPath(ctx.params.file);
+      stats = fs.statSync(filePath);
     } catch (error) {
       fail(ctx, 404, error, "Backup not found");
+      return;
     }
+
+    // Stream the file directly with a known Content-Length so the browser
+    // knows the expected size and can fail loudly on truncation. The previous
+    // PassThrough chain had no length header and no error handler — when the
+    // pipe broke (auth retry, proxy buffering, network blip) the response
+    // ended cleanly with 0 bytes written, so the user saved an empty file.
+    const safeName = String(ctx.params.file).replace(/"/g, "");
+    ctx.set("Content-Type", pickDownloadMime(ctx.params.file));
+    ctx.set("Content-Disposition", `attachment; filename="${safeName}"`);
+    ctx.set("Content-Length", String(stats.size));
+    ctx.set("Cache-Control", "no-store");
+    ctx.set("Accept-Ranges", "none");
+    ctx.status = 200;
+
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.on("error", (err) => {
+      strapi.log.error(`[import-export:backup.download] read failed: ${err.message}`);
+      ctx.res.destroy(err);
+    });
+    ctx.body = fileStream;
   },
 
   async restore(ctx) {

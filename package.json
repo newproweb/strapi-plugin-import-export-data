@@ -1,6 +1,6 @@
 {
   "name": "import-export-data",
-  "version": "5.2.0",
+  "version": "5.3.0",
   "description": "Import/export data and scheduled database backups for Strapi 5. Wraps the official `strapi export` / `strapi import` CLI and adds per-collection CSV/JSON/XLSX export, encrypted tar archives, cron-scheduled auto-backups with retention, and one-click restore — all from the admin UI.",
   "license": "MIT",
   "keywords": [
