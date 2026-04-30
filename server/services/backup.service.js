@@ -213,11 +213,6 @@ const restoreBackup = async (
 };
 
 const createBackupJob = (options = {}) => {
-  // Pre-flight: in `strapi develop` we must ensure chokidar isn't watching
-  // the backup dir, otherwise writing the archive mid-job will auto-restart
-  // Strapi and kill the CLI. Throws HTTP 412 synchronously before we spawn
-  // anything so the user sees a clear, actionable error instead of a
-  // broken job that dies silently.
   assertDevConfig();
   return runInBackground(JOB_TYPES.EXPORT, (onLog) => createBackup(options, onLog));
 };

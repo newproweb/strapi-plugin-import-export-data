@@ -18,7 +18,7 @@ import { deleteAction, restoreAction, downloadAction, stageUpload, importUpload 
 
 const ImportExportPanel = () => {
   const { toggleNotification } = useNotification();
-  const runningJobs = useRunningJobs();
+  const { runningJobs, refresh: refreshRunningJobs } = useRunningJobs();
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +95,7 @@ const ImportExportPanel = () => {
         exclude: restoreExcludeFiles ? "files" : undefined,
       });
       setProgressJob({ jobId, type: "import" });
+      refreshRunningJobs();
       setConfirm(null);
       setRestoreExcludeFiles(false);
     } catch (e) {
@@ -138,6 +139,7 @@ const ImportExportPanel = () => {
     try {
       const jobId = await importUpload(uploadFile, uploadKey, { notify, reload });
       setProgressJob({ jobId, type: "import" });
+      refreshRunningJobs();
       resetUpload();
     } catch (e) {
       notify({ type: "danger", message: readServerError(e) });
@@ -199,6 +201,7 @@ const ImportExportPanel = () => {
           onStartJob={(jobId) => {
             setExportOpen(false);
             setProgressJob({ jobId, type: "export" });
+            refreshRunningJobs();
           }}
         />
       )}

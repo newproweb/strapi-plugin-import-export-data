@@ -1,29 +1,15 @@
 "use strict";
 
-const STATE = { label: null, startedAt: null, jobId: null };
+const { getJobMutex } = require("./job-store");
 
-const isBusy = () => STATE.label !== null;
+const isBusy = () => getJobMutex().isBusy();
 
-const currentLabel = () => STATE.label;
+const currentLabel = () => getJobMutex().currentLabel();
 
-const current = () => (isBusy() ? { ...STATE } : null);
+const current = () => getJobMutex().current();
 
-const acquire = (label, jobId) => {
-  if (isBusy()) {
-    const err = new Error(`Another ${STATE.label} job is already running (id=${STATE.jobId}) — wait for it to finish or cancel it before starting ${label}.`);
-    err.status = 409;
-    throw err;
-  }
+const acquire = (label, jobId) => getJobMutex().acquire(label, jobId);
 
-  STATE.label = label;
-  STATE.jobId = jobId;
-  STATE.startedAt = Date.now();
-};
-
-const release = () => {
-  STATE.label = null;
-  STATE.jobId = null;
-  STATE.startedAt = null;
-};
+const release = (jobId) => getJobMutex().release(jobId);
 
 module.exports = { acquire, release, isBusy, currentLabel, current };

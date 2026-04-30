@@ -21,8 +21,15 @@ const resolveStrapiBin = () => {
 };
 
 const emitLine = (stream, line, onLog) => {
-  const log = stream === "stdout" ? strapi.log.info : strapi.log.warn;
-  log.call(strapi.log, `[strapi-cli] ${line}`);
+  // setInterval-driven heartbeats and child stdio chunks may arrive while
+  // `strapi develop` is mid-reload — guard the global access so a transient
+  // ReferenceError can't kill the parent process.
+  try {
+    if (typeof strapi !== "undefined" && strapi?.log) {
+      const log = stream === "stdout" ? strapi.log.info : strapi.log.warn;
+      log.call(strapi.log, `[strapi-cli] ${line}`);
+    }
+  } catch { /* ignore */ }
   if (!onLog) return;
   try {
     onLog({ stream, line });
@@ -58,14 +65,29 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog } = {}) =>
   new Promise((resolve, reject) => {
     const { cmd, baseArgs } = resolveStrapiBin();
     const fullArgs = [...baseArgs, ...args];
-    strapi.log.info(`[import-export] spawning: ${cmd} ${fullArgs.join(" ")}`);
+    try {
+      if (typeof strapi !== "undefined" && strapi?.log?.info) {
+        strapi.log.info(`[import-export] spawning: ${cmd} ${fullArgs.join(" ")}`);
+      }
+    } catch { /* ignore */ }
 
+    // The child CLI re-bootstraps a full Strapi instance before running the
+    // import/export. Two env overrides matter:
+    //   - NODE_ENV: forced to "production" so the child skips chokidar file
+    //     watcher, admin panel rebuild, and other develop-mode side effects
+    //     (otherwise child can sit in "Spawning…" for 30-60s on dev hosts).
+    //   - TESTING_MODE: forced off so user-defined bootstrap seeds (e.g.
+    //     `if (TESTING_MODE) await seedHomePage(...)`) do NOT run inside the
+    //     short-lived import/export process. Otherwise seeds insert rows
+    //     that don't belong in the source archive — turning a clean restore
+    //     into a partially polluted DB on cross-server imports.
     const child = spawn(cmd, fullArgs, {
       cwd: appRoot(),
       env: {
         ...process.env,
         STRAPI_TELEMETRY_DISABLED: "true",
-        NODE_ENV: process.env.NODE_ENV || "production",
+        NODE_ENV: "production",
+        TESTING_MODE: "false",
       },
       stdio: ["ignore", "pipe", "pipe"],
       shell: process.platform === "win32",

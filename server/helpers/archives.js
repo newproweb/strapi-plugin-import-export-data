@@ -20,13 +20,33 @@ const describeBackupFile = (dir, name) => {
   };
 };
 
+/**
+ * Lists backup archives in the backup dir. `fs.statSync` is race-prone — a
+ * file can disappear between `readdirSync` and `statSync` if another process
+ * (cron retention prune, manual delete, partial-snapshot cleanup) removes it
+ * mid-listing. Wrapping each describe call in try/catch lets the listing
+ * survive that race instead of throwing the whole list.
+ */
 const listBackups = () => {
   const dir = ensureBackupDir();
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && BACKUP_EXT.test(e.name))
-    .map((e) => describeBackupFile(dir, e.name))
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    strapi.log.warn(`[import-export] listBackups readdir failed: ${err.message}`);
+    return [];
+  }
+
+  const items = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !BACKUP_EXT.test(entry.name)) continue;
+    try {
+      items.push(describeBackupFile(dir, entry.name));
+    } catch (err) {
+      strapi.log.warn(`[import-export] skipped ${entry.name} during listing: ${err.message}`);
+    }
+  }
+  return items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 };
 
 const safeBackupPath = (fileName) => {

@@ -2,39 +2,28 @@
 
 const {
   MAX_LOG_LINES,
-  JOB_TTL_MS,
   KNOWN_STAGES,
   COMPLETION_MARKERS,
 } = require("../constants/backup");
 
-const jobs = new Map();
-
-const STUCK_JOB_MS = 30 * 60 * 1000;
-
-const pruneExpiredJobs = () => {
-  const now = Date.now();
-  const cutoff = now - JOB_TTL_MS;
-  const stuckCutoff = now - STUCK_JOB_MS;
-  for (const [id, job] of jobs) {
-    if (job.finishedAt && job.finishedAt < cutoff) {
-      jobs.delete(id);
-      continue;
-    }
-    if (job.status === "running" && !job.finishedAt) {
-      const lastActivity = job.logLines.length
-        ? job.logLines[job.logLines.length - 1].at
-        : job.startedAt;
-      if (lastActivity < stuckCutoff) {
-        job.status = "error";
-        job.error = "Job marked as stuck — no progress for 15 minutes (likely left over from a crashed process).";
-        job.finishedAt = now;
-      }
-    }
-  }
-};
+const { getJobStore } = require("./job-store");
 
 const stagePercent = (stagesDone) =>
-  Math.round((stagesDone.size / KNOWN_STAGES.length) * 100);
+  Math.round((stagesDone.length / KNOWN_STAGES.length) * 100);
+
+// Strapi v5 import does NOT always emit a `✔ <stage>:` line for each stage —
+// it often jumps straight to the next stage's `- <next>:` start marker. Without
+// retrofitting the prior stages as done, the % bar gets stuck at the first
+// stage's band (e.g. 20% during the entire `assets` stage). Whenever we observe
+// activity in stage N, mark stages 0..N-1 as done.
+const markPriorStagesDone = (job, currentStageName) => {
+  const idx = KNOWN_STAGES.indexOf(currentStageName);
+  if (idx <= 0) return;
+  if (!Array.isArray(job.stagesDone)) job.stagesDone = [];
+  for (let i = 0; i < idx; i += 1) {
+    if (!job.stagesDone.includes(KNOWN_STAGES[i])) job.stagesDone.push(KNOWN_STAGES[i]);
+  }
+};
 
 const matchPercent = (job, line) => {
   const pct = line.match(/(\d{1,3})\s*%/);
@@ -47,11 +36,12 @@ const matchPercent = (job, line) => {
 };
 
 const matchStageDone = (job, line) => {
-  const done = line.match(/^[\s\u2714\u2713✔✓]+(\w+)\s*:/);
+  const done = line.match(/^[\s✔✓]+(\w+)\s*:/);
   if (!done) return false;
   const name = done[1].toLowerCase();
   if (!KNOWN_STAGES.includes(name)) return false;
-  job.stagesDone.add(name);
+  markPriorStagesDone(job, name);
+  if (!job.stagesDone.includes(name)) job.stagesDone.push(name);
   job.progress = {
     percent: Math.min(99, stagePercent(job.stagesDone)),
     stage: `${name} done`,
@@ -60,13 +50,11 @@ const matchStageDone = (job, line) => {
 };
 
 const matchStageProgress = (job, line) => {
-  // Matches Strapi CLI spinner output like:
-  //   - assets: 1234 transferred (size: 15 MB) (elapsed: 9500 ms) (1.6 MB/s)
-  //   ✔ entities: 22904 transferred (size: 26 MB) (elapsed: 23141 ms) (1.1 MB/s)
   const m = line.match(/(\w+):\s+(\d+)\s+transferred\s+\(size:\s*([\d.]+)\s*([KMGT]?B)\)(?:\s+\(elapsed:\s*(\d+)\s*ms\))?(?:\s+\(([\d.]+)\s*([KMGT]?B)\/s\))?/i);
   if (!m) return false;
   const name = m[1].toLowerCase();
   if (!KNOWN_STAGES.includes(name)) return false;
+  markPriorStagesDone(job, name);
   const count = Number(m[2]);
   const sizeVal = m[3];
   const sizeUnit = m[4];
@@ -84,6 +72,7 @@ const matchStageStarted = (job, line) => {
   if (!started) return false;
   const name = started[1].toLowerCase();
   if (!KNOWN_STAGES.includes(name)) return false;
+  markPriorStagesDone(job, name);
   job.progress = {
     percent: Math.max(job.progress?.percent || 0, stagePercent(job.stagesDone)),
     stage: `Working on ${name}…`,
@@ -116,18 +105,23 @@ const matchAssetMonitorProgress = (job, line) => {
   const m = line.match(/\[assets-progress\]\s+uploads\/\s*=\s*(\d+)\s+file\(s\)(?:,\s*([\d.]+\s*[KMGT]?B))?/i);
   if (!m) return false;
 
-  // Only animate the bar once the CLI has actually announced the assets
-  // stage (`matchStageStarted` sets the label to "Working on assets…").
-  // Before that, our monitor can still emit lines for the pre-transfer
-  // deletion work, where the file count doesn't map to real progress.
   if (!/assets/i.test(job.progress?.stage || "")) return true;
+
+  // We're inside the assets stage — by definition every prior stage
+  // (schemas, entities, links) is done even if Strapi v5's CLI never
+  // emitted a `✔` line for them. Backfill so the % bar starts from the
+  // correct stage band instead of being stuck at 20%.
+  markPriorStagesDone(job, "assets");
 
   const count = Number(m[1]);
   const sizeLabel = m[2] || "";
 
-  const fraction = 1 - 1 / (1 + count / 1000);
+  // Asymptotic curve — midpoint at ~500 files (was 1000) so small-to-medium
+  // archives reach the upper half of the assets band quickly. At count=500
+  // fraction=0.5; at count=2000 fraction=0.8; at count=5000 fraction=0.91.
+  const fraction = 1 - 1 / (1 + count / 500);
   const stageSpan = 100 / KNOWN_STAGES.length;
-  const stageBase = (job.stagesDone?.size || 0) * stageSpan;
+  const stageBase = (job.stagesDone?.length || 0) * stageSpan;
   const withinStagePercent = Math.round(
     Math.min(stageBase + stageSpan - 1, stageBase + fraction * stageSpan),
   );
@@ -140,7 +134,7 @@ const matchAssetMonitorProgress = (job, line) => {
 };
 
 const updateProgressFromLine = (job, line) => {
-  if (!job.stagesDone) job.stagesDone = new Set();
+  if (!Array.isArray(job.stagesDone)) job.stagesDone = [];
   if (matchPercent(job, line)) return;
   if (matchStageDone(job, line)) return;
   if (matchStageProgress(job, line)) return;
@@ -149,32 +143,53 @@ const updateProgressFromLine = (job, line) => {
   matchCompletion(job, line);
 };
 
-const pushLog = (job, { stream, line }) => {
-  job.lastLine = line;
-  job.lastStream = stream;
-  job.logLines.push({ stream, line, at: Date.now() });
-  if (job.logLines.length > MAX_LOG_LINES) job.logLines.shift();
-  updateProgressFromLine(job, line);
+/**
+ * Creates a new job in the configured store, prunes expired entries, and
+ * returns the freshly-created job object. Callers should treat the returned
+ * job as a snapshot — subsequent mutations must go through `pushLog` /
+ * `updateJob` so they are persisted to disk and visible to other replicas.
+ */
+const makeJob = (type) => {
+  const store = getJobStore();
+  store.prune();
+  return store.create(type);
 };
 
-const makeJob = (type) => {
-  pruneExpiredJobs();
-  const id = `job-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const job = {
-    id,
-    type,
-    status: "running",
-    startedAt: Date.now(),
-    finishedAt: null,
-    lastLine: "",
-    lastStream: "stdout",
-    logLines: [],
-    progress: { percent: 0, stage: "" },
-    result: null,
-    error: null,
-  };
-  jobs.set(id, job);
-  return job;
+/**
+ * Appends a CLI log line to the job, runs progress-regex matchers, and
+ * schedules a debounced flush to disk. Returns silently if the job no
+ * longer exists in the store (e.g. expired between events).
+ */
+const pushLog = (jobId, { stream, line }) => {
+  const store = getJobStore();
+  store.update(jobId, (job) => {
+    job.lastLine = line;
+    job.lastStream = stream;
+    if (!Array.isArray(job.logLines)) job.logLines = [];
+    job.logLines.push({ stream, line, at: Date.now() });
+    if (job.logLines.length > MAX_LOG_LINES) job.logLines.shift();
+    updateProgressFromLine(job, line);
+  });
+};
+
+/**
+ * Applies a shallow patch to a job and schedules a debounced flush.
+ * Used by `background-job.js` for terminal status transitions
+ * (success/error/finishedAt).
+ */
+const updateJob = (jobId, patch) => {
+  const store = getJobStore();
+  return store.update(jobId, (job) => Object.assign(job, patch));
+};
+
+/**
+ * Forces an immediate write of the cached job to disk, bypassing the
+ * debounce timer. Called when a job ends so the final status is visible
+ * to other replicas without waiting for the debounce window.
+ */
+const finalizeJob = (jobId) => {
+  const store = getJobStore();
+  store.flush(jobId);
 };
 
 const serializeJob = (job) => ({
@@ -185,23 +200,25 @@ const serializeJob = (job) => ({
   finishedAt: job.finishedAt ? new Date(job.finishedAt).toISOString() : null,
   elapsedMs: (job.finishedAt || Date.now()) - job.startedAt,
   progress: job.progress,
-  stagesDone: job.stagesDone ? Array.from(job.stagesDone) : [],
+  stagesDone: Array.isArray(job.stagesDone) ? job.stagesDone : [],
   transferComplete: Boolean(job.transferComplete),
   lastLine: job.lastLine,
   lastStream: job.lastStream,
-  recentLines: job.logLines.slice(-80),
+  recentLines: (job.logLines || []).slice(-80),
   result: job.result,
   error: job.error,
 });
 
 const getJob = (id) => {
-  const job = jobs.get(id);
+  const store = getJobStore();
+  const job = store.get(id);
   return job ? serializeJob(job) : null;
 };
 
 const listJobs = () => {
-  pruneExpiredJobs();
-  return Array.from(jobs.values()).map(serializeJob);
+  const store = getJobStore();
+  store.prune();
+  return store.list().map(serializeJob);
 };
 
-module.exports = { makeJob, pushLog, getJob, listJobs };
+module.exports = { makeJob, pushLog, updateJob, finalizeJob, getJob, listJobs };

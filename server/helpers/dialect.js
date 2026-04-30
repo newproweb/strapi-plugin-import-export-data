@@ -2,13 +2,30 @@
 
 const CHUNK = 80;
 
-const knex = () => strapi.db?.connection;
+// Returns the active Knex connection, or null when the parent Strapi instance
+// is unavailable (e.g. mid-reload in `strapi develop`). Callers — especially
+// timer-driven ones like the live-auth patcher — rely on null to no-op a tick
+// instead of throwing a ReferenceError on the global `strapi`.
+const knex = () => {
+  try {
+    if (typeof strapi === "undefined" || !strapi) return null;
+    return strapi.db?.connection || null;
+  } catch {
+    return null;
+  }
+};
 
 const dialect = (db) => String(db?.client?.config?.client || "").toLowerCase();
 
 const isPg = (d) => d.includes("pg") || d.includes("postgres");
 const isMysql = (d) => d.includes("mysql");
 const isSqlite = (d) => d.includes("sqlite");
+
+const safeWarn = (msg) => {
+  try {
+    if (typeof strapi !== "undefined" && strapi?.log?.warn) strapi.log.warn(msg);
+  } catch { /* ignore — strapi global may be undefined mid-reload */ }
+};
 
 const setFkEnabled = async (db, enabled) => {
   const d = dialect(db);
@@ -18,7 +35,7 @@ const setFkEnabled = async (db, enabled) => {
     if (isMysql(d)) return db.raw(`SET FOREIGN_KEY_CHECKS = ${enabled ? 1 : 0}`);
     return undefined;
   } catch (err) {
-    strapi.log.warn(`[import-export] setFkEnabled(${enabled}) failed: ${err.message}`);
+    safeWarn(`[import-export] setFkEnabled(${enabled}) failed: ${err.message}`);
     return undefined;
   }
 };
@@ -31,7 +48,7 @@ const resetPgSequenceForId = async (db, table) => {
     if (!seq) return;
     await db.raw(`SELECT setval('${seq}', COALESCE((SELECT MAX(id) FROM "${table}"), 1), true)`);
   } catch (err) {
-    strapi.log.warn(`[import-export] resetPgSequence ${table}: ${err.message}`);
+    safeWarn(`[import-export] resetPgSequence ${table}: ${err.message}`);
   }
 };
 

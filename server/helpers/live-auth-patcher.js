@@ -5,82 +5,87 @@ const { knex, setFkEnabled } = require("./dialect");
 
 const CORE_STORE_TABLE = "strapi_core_store_settings";
 
-// Aggressive tick rate: the CLI wipes `admin_users` + related auth tables
-// briefly, and any admin API request landing in that window returns 401 —
-// which the Strapi admin SPA treats as "session lost" and shows a loading
-// screen. 500ms keeps that window to at most half a second, so occasional
-// SPA polls hit a populated table.
 const DEFAULT_INTERVAL_MS = 500;
 
-// Roughly every 10s at the default tick rate — emits a heartbeat so the
-// job log shows the patcher is still alive even when no rows needed
-// re-injecting this round.
 const HEARTBEAT_EVERY_N_TICKS = 20;
 
+const ERROR_LOG_THROTTLE = 5;
+
 /**
- * For a single auth table, re-inserts only the rows that are currently
- * missing in the DB (compared to the captured snapshot). Keeps the working
- * set tiny (diff by id) so each tick is cheap. Never throws — a failure
- * here just means we skip this tick and try again next time.
+ * Build the list of non-PK column names from the snapshot rows so the upsert
+ * `.merge([...])` clause knows which columns to overwrite on conflict.
+ */
+const nonPkColumns = (rows) => {
+  const cols = new Set();
+  for (const row of rows) {
+    for (const key of Object.keys(row || {})) if (key !== "id") cols.add(key);
+  }
+  return [...cols];
+};
+
+/**
+ * Upserts every snapshot row by `id` — on conflict, the existing row is
+ * OVERWRITTEN with the snapshot column values. Previously this used
+ * `.onConflict('id').ignore()` which kept whatever the import CLI had just
+ * inserted (e.g. develop's admin user) and never restored the local user,
+ * causing 401 "session invalidated" mid-import on cross-server restores.
  *
- * @returns {Promise<number>} number of rows re-inserted during this call.
+ * @returns {Promise<{ upserted: number, error: Error | null }>}
  */
 const ensureRowsPresent = async (db, table, rows) => {
-  if (!rows || rows.length === 0) return 0;
+  if (!rows || rows.length === 0) return { upserted: 0, error: null };
+
   try {
-    if (!(await db.schema.hasTable(table))) return 0;
-  } catch {
-    return 0;
+    if (!(await db.schema.hasTable(table))) return { upserted: 0, error: null };
+  } catch (err) {
+    return { upserted: 0, error: err };
   }
 
   const snapshotRowsById = rows.filter((r) => r && r.id !== undefined);
-  if (snapshotRowsById.length === 0) return 0;
+  if (snapshotRowsById.length === 0) return { upserted: 0, error: null };
 
-  const snapshotIds = snapshotRowsById.map((r) => r.id);
-
-  let existingIds;
-  try {
-    existingIds = await db(table).whereIn("id", snapshotIds).pluck("id");
-  } catch {
-    return 0;
-  }
-
-  const existing = new Set(existingIds.map(String));
-  const missing = snapshotRowsById.filter((r) => !existing.has(String(r.id)));
-  if (missing.length === 0) return 0;
+  const mergeCols = nonPkColumns(snapshotRowsById);
 
   try {
-    await db(table).insert(missing);
-    return missing.length;
+    if (mergeCols.length === 0) {
+      await db(table).insert(snapshotRowsById).onConflict("id").ignore();
+    } else {
+      await db(table).insert(snapshotRowsById).onConflict("id").merge(mergeCols);
+    }
+    return { upserted: snapshotRowsById.length, error: null };
   } catch (err) {
-    strapi.log.debug(`[import-export] live-auth ${table}: insert skipped (${err.message})`);
-    return 0;
+    return { upserted: 0, error: err };
   }
 };
 
 /**
  * Core-store auth keys (JWT secrets, admin auth config) are keyed by `key`,
- * not `id`, so we diff by key rather than by id.
+ * not `id`. Upsert with merge so the snapshot value always wins over whatever
+ * the import CLI just wrote — same reasoning as `ensureRowsPresent`.
  */
 const ensureCoreStoreKeys = async (db, rows) => {
-  if (!rows || rows.length === 0) return 0;
+  if (!rows || rows.length === 0) return { upserted: 0, error: null };
 
-  let inserted = 0;
+  let upserted = 0;
+  let lastError = null;
   for (const row of rows) {
+    const { id: _ignored, ...rest } = row;
+    const mergeCols = Object.keys(rest).filter((k) => k !== "key");
     try {
-      const { id, ...rest } = row;
-      const exists = await db(CORE_STORE_TABLE).where({ key: rest.key }).first();
-      if (exists) continue;
-      await db(CORE_STORE_TABLE).insert(rest);
-      inserted += 1;
-    } catch {
-      // ignore — another tick will retry
+      if (mergeCols.length === 0) {
+        await db(CORE_STORE_TABLE).insert(rest).onConflict("key").ignore();
+      } else {
+        await db(CORE_STORE_TABLE).insert(rest).onConflict("key").merge(mergeCols);
+      }
+      upserted += 1;
+    } catch (err) {
+      lastError = err;
     }
   }
-  return inserted;
+  return { upserted, error: lastError };
 };
 
-const runPatchTick = async (snapshot) => {
+const runPatchTick = async (snapshot, errorBucket) => {
   const db = knex();
   if (!db) return 0;
 
@@ -90,9 +95,13 @@ const runPatchTick = async (snapshot) => {
     for (const table of BASE_AUTH_TABLES) {
       const rows = snapshot.tables?.[table];
       if (!rows) continue;
-      patched += await ensureRowsPresent(db, table, rows);
+      const { upserted, error } = await ensureRowsPresent(db, table, rows);
+      patched += upserted;
+      if (error) errorBucket.push({ table, message: error.message });
     }
-    patched += await ensureCoreStoreKeys(db, snapshot.coreStore);
+    const coreResult = await ensureCoreStoreKeys(db, snapshot.coreStore);
+    patched += coreResult.upserted;
+    if (coreResult.error) errorBucket.push({ table: CORE_STORE_TABLE, message: coreResult.error.message });
   } finally {
     await setFkEnabled(db, true);
   }
@@ -110,11 +119,6 @@ const runPatchTick = async (snapshot) => {
  * started, every `intervalMs`, so the admin session keeps working during
  * the import. The CLI may wipe them again — the next tick re-inserts.
  *
- * The patcher is best-effort: it never throws, never blocks, and stops
- * cleanly via the returned `stop()` handle (idempotent). A `replayAuth`
- * snapshot at the end of the restore is still required as the final,
- * authoritative restore of the auth state.
- *
  * @param {object|null} snapshot  Output of `takeAuthSnapshot`. If null or
  *   falsy, this is a no-op — returns a `stop()` that does nothing.
  * @param {(line: string) => void} [emit]  Log sink for user-visible lines.
@@ -124,43 +128,56 @@ const runPatchTick = async (snapshot) => {
 const startLiveAuthPatcher = (snapshot, emit, { intervalMs = DEFAULT_INTERVAL_MS } = {}) => {
   if (!snapshot) return { stop: () => {} };
 
-  emit?.(`[live-auth] patcher ACTIVE — will re-inject admin auth rows every ${intervalMs}ms so admin API requests keep returning 200 during the CLI import`);
+  emit?.(`[live-auth] patcher ACTIVE — will UPSERT (insert or replace) admin auth rows every ${intervalMs}ms so admin API requests keep returning 200 during the CLI import (cross-server safe)`);
 
   let stopped = false;
   let stopAnnounced = false;
   let cumulativePatched = 0;
   let ticksRun = 0;
   let lastTickBusy = false;
+  let errorsLogged = 0;
+  const errorCounts = new Map();
 
   const tick = async () => {
     if (stopped) return;
-    // Use a setTimeout chain instead of setInterval so slow ticks don't
-    // pile up in parallel. If the previous tick is still running when the
-    // next interval fires, we just skip and wait for it to complete.
     if (lastTickBusy) return;
+    // The 500ms timer can fire while `strapi develop` is mid-reload (chokidar
+    // file-watch swap) — global.strapi is briefly undefined, and any throw
+    // here becomes an unhandledRejection that terminates Node 20+. Guard it.
+    if (typeof strapi === "undefined" || !strapi || !strapi.db) return;
     lastTickBusy = true;
 
+    const errorBucket = [];
+
     try {
-      const patched = await runPatchTick(snapshot);
+      const patched = await runPatchTick(snapshot, errorBucket);
       ticksRun += 1;
       if (patched > 0) cumulativePatched += patched;
 
-      // Periodic heartbeat so the user can see in the job log that the
-      // patcher is alive even during stretches where nothing needed to
-      // be re-inserted this round.
+      for (const { table, message } of errorBucket) {
+        const key = `${table}: ${message}`;
+        const count = (errorCounts.get(key) || 0) + 1;
+        errorCounts.set(key, count);
+        if (errorsLogged < ERROR_LOG_THROTTLE) {
+          emit?.(`[live-auth] ${table} write skipped — ${message}`);
+          errorsLogged += 1;
+        }
+      }
+
       if (ticksRun % HEARTBEAT_EVERY_N_TICKS === 0) {
-        emit?.(`[live-auth] ${ticksRun} tick(s) run, ${cumulativePatched} row(s) re-injected so far`);
+        const errorSummary = errorCounts.size === 0
+          ? ""
+          : ` (errors so far: ${[...errorCounts.entries()].map(([k, c]) => `${c}× ${k}`).join("; ")})`;
+        emit?.(`[live-auth] ${ticksRun} tick(s) run, ${cumulativePatched} row(s) re-injected so far${errorSummary}`);
       }
     } catch (err) {
-      strapi.log.debug(`[import-export] live-auth tick failed: ${err.message}`);
+      emit?.(`[live-auth] tick failed: ${err && err.message ? err.message : String(err)}`);
     } finally {
       lastTickBusy = false;
     }
   };
 
   const timer = setInterval(tick, intervalMs);
-  // Kick off the first tick immediately rather than waiting `intervalMs`
-  // — the CLI can wipe tables within the first second.
   tick();
 
   return {
@@ -169,7 +186,10 @@ const startLiveAuthPatcher = (snapshot, emit, { intervalMs = DEFAULT_INTERVAL_MS
       stopAnnounced = true;
       stopped = true;
       clearInterval(timer);
-      emit?.(`[live-auth] stopped — ${ticksRun} tick(s), ${cumulativePatched} row(s) re-injected during the CLI run`);
+      const errorSummary = errorCounts.size === 0
+        ? ""
+        : ` (errors during run: ${[...errorCounts.entries()].map(([k, c]) => `${c}× ${k}`).join("; ")})`;
+      emit?.(`[live-auth] stopped — ${ticksRun} tick(s), ${cumulativePatched} row(s) re-injected during the CLI run${errorSummary}`);
     },
   };
 };

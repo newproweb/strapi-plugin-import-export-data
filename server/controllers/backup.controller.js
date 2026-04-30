@@ -48,15 +48,24 @@ module.exports = ({ strapi }) => ({
       filePath = services().backup.getBackupPath(ctx.params.file);
       stats = fs.statSync(filePath);
     } catch (error) {
-      fail(ctx, 404, error, "Backup not found");
+      ctx.status = 404;
+      ctx.body = {
+        error: {
+          status: 404,
+          name: "BackupNotFound",
+          message:
+            `Backup not found: ${ctx.params.file}. `
+            + "It may have been removed since the list was loaded "
+            + "(retention prune, manual delete, or — when running multiple Strapi replicas — "
+            + "the file lives only on another replica's disk because the backup directory is not on a shared volume; see plugin README). "
+            + "Refresh the page to see the current state.",
+          code: "BACKUP_NOT_FOUND",
+        },
+      };
       return;
     }
 
-    // Stream the file directly with a known Content-Length so the browser
-    // knows the expected size and can fail loudly on truncation. The previous
-    // PassThrough chain had no length header and no error handler — when the
-    // pipe broke (auth retry, proxy buffering, network blip) the response
-    // ended cleanly with 0 bytes written, so the user saved an empty file.
+
     const safeName = String(ctx.params.file).replace(/"/g, "");
     ctx.set("Content-Type", pickDownloadMime(ctx.params.file));
     ctx.set("Content-Disposition", `attachment; filename="${safeName}"`);
@@ -91,11 +100,6 @@ module.exports = ({ strapi }) => ({
   async jobStatus(ctx) {
     const job = services().backup.getJob(ctx.params.id);
     if (!job) {
-      // Use a plain 404 response instead of `ctx.throw` — the job map is
-      // in-memory, so a missing job just means the Strapi process was
-      // restarted between the restore start and this poll. We don't want
-      // Koa's error middleware to log a full stack trace for every poll;
-      // the frontend already handles this status and stops polling.
       ctx.status = 404;
       ctx.body = {
         error: {
