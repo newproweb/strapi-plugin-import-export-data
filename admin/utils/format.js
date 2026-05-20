@@ -33,11 +33,40 @@ const isHtmlJsonError = (e) =>
   /Unexpected token '<'|is not valid JSON/i.test(e?.message || "")
   || looksLikeHtml(e?.response?.data);
 
-export const readServerError = (e) => {
-  if (isHtmlJsonError(e)) {
-    return "Server returned an HTML error page instead of JSON — the archive likely exceeded the body-size limit. "
-      + "Raise `strapi::body` limits in config/middlewares.js (jsonLimit/formLimit/textLimit/formidable.maxFileSize) and restart Strapi.";
+const extractHtmlTitle = (s) => {
+  if (typeof s !== "string") return null;
+  const m = s.match(/<title[^>]*>([^<]+)<\/title>/i);
+  return m ? m[1].trim() : null;
+};
+
+const httpStatusMessage = (status) => {
+  switch (status) {
+    case 413: return "Request body too large — uploaded archive exceeded the reverse-proxy or Strapi body-size limit. "
+      + "Check `client_max_body_size` in the nginx/proxy config and `strapi::body` limits in config/middlewares.js.";
+    case 502: return "Bad gateway — the admin upstream is not reachable. "
+      + "One or more admin replicas may be restarting, crashed, or still booting.";
+    case 503: return "Service unavailable — admin upstream is temporarily not accepting requests.";
+    case 504: return "Gateway timeout — admin took too long to respond. "
+      + "For large archives, raise `proxy_read_timeout` / `proxy_send_timeout` in the nginx config.";
+    case 401: return "Unauthorized — admin session may have expired. Reload the admin and sign in again.";
+    case 403: return "Forbidden — your account does not have permission for this action.";
+    case 404: return "Not found — the plugin endpoint is missing. The plugin may not be loaded.";
+    case 500: return "Internal server error — check the admin container logs for the stack trace.";
+    default: return null;
   }
+};
+
+export const readServerError = (e) => {
+  const status = e?.response?.status ?? e?.status;
+  const html = looksLikeHtml(e?.response?.data) ? e.response.data : null;
+
+  if (html || isHtmlJsonError(e)) {
+    const fromStatus = httpStatusMessage(status);
+    if (fromStatus) return `${fromStatus} (HTTP ${status})`;
+    const title = extractHtmlTitle(html);
+    return `Server returned an HTML error page instead of JSON${status ? ` (HTTP ${status})` : ""}${title ? ` — ${title}` : ""}. Check admin container logs.`;
+  }
+
   return (
     e?.response?.data?.error?.message
     || e?.response?.data?.error

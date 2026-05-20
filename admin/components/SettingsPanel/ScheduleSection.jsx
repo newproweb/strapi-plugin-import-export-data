@@ -24,8 +24,9 @@ const ScheduleSection = ({ cfg, onField }) => {
 
   return (
     <Box borderColor="neutral200" padding={5} hasRadius shadow="filterShadow" marginBottom={4}>
-      <Typography variant="beta" marginBottom={2}>Auto-backup schedule</Typography>
-      <br /><br />
+      <Box paddingBottom={4}>
+        <Typography variant="beta">Auto-backup schedule</Typography>
+      </Box>
       <Flex direction="column" gap={4} alignItems="stretch">
         <Field.Root>
           <Field.Label marginBottom={2}>Cron expression</Field.Label>

@@ -9,8 +9,9 @@ const EncryptionSection = ({ cfg, onField }) => {
 
   return (
     <Box borderColor="neutral200" padding={5} hasRadius shadow="filterShadow" marginBottom={4}>
-      <Typography variant="beta" marginBottom={2}>Encryption</Typography>
-      <br /><br />
+      <Box paddingBottom={4}>
+        <Typography variant="beta">Encryption</Typography>
+      </Box>
       <Flex direction="column" gap={3} alignItems="stretch">
         <Field.Root>
           <Field.Label marginBottom={2}>Encryption key (optional)</Field.Label>

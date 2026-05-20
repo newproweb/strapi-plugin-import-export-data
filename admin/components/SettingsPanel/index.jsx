@@ -92,13 +92,13 @@ const SettingsPanel = () => {
     <Box>
       <ScheduleSection cfg={cfg} onField={onField} />
       <EncryptionSection cfg={cfg} onField={onField} />
-      <Flex gap={2} justifyContent="flex-end" paddingBottom={4}>
+      <LastRunBox lastBackupAt={cfg.lastBackupAt} />
+      <Flex gap={2} justifyContent="flex-end" paddingTop={4} paddingBottom={4}>
         <Button variant="secondary" onClick={onRunNow} loading={running} startIcon={<Play />}>
           Run now
         </Button>
         <Button onClick={onSave} loading={saving}>Save settings</Button>
       </Flex>
-      <LastRunBox lastBackupAt={cfg.lastBackupAt} />
     </Box>
   );
 };

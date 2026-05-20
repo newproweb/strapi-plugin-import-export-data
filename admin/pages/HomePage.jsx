@@ -1,14 +1,16 @@
 import React from "react";
 
 import { Page, Layouts, useRBAC } from "@strapi/strapi/admin";
-import { Box, Tabs, Typography, Loader, Flex } from "@strapi/design-system";
+import { Box, Tabs, Typography, Loader, Flex, Divider } from "@strapi/design-system";
+import { Database, Cog } from "@strapi/icons";
 
 import ImportExportPanel from "../components/ImportExportPanel";
 import SettingsPanel from "../components/SettingsPanel";
 import { PERMISSIONS } from "../constants/permissions";
+import pkg from "../../package.json";
 
-const BASE_TAB = { id: "import-export", label: "Import / Export", Component: ImportExportPanel };
-const SETTINGS_TAB = { id: "settings", label: "Settings", Component: SettingsPanel };
+const BASE_TAB = { id: "import-export", label: "Import / Export", Icon: Database, Component: ImportExportPanel };
+const SETTINGS_TAB = { id: "settings", label: "Settings", Icon: Cog, Component: SettingsPanel };
 
 const HomePage = () => {
   const { isLoading, allowedActions } = useRBAC({
@@ -16,8 +18,8 @@ const HomePage = () => {
     canSettings: PERMISSIONS.settings,
   });
 
-  if (isLoading) {
-    return (
+  if (isLoading || !allowedActions) {
+    return ( 
       <Page.Main>
         <Flex justifyContent="center" padding={6}>
           <Loader>Checking permissions…</Loader>
@@ -26,7 +28,7 @@ const HomePage = () => {
     );
   }
 
-  if (!allowedActions?.canRead) {
+  if (!allowedActions.canRead) {
     return (
       <Page.Main>
         <Page.NoPermissions />
@@ -38,19 +40,22 @@ const HomePage = () => {
   if (allowedActions?.canSettings) tabs.push(SETTINGS_TAB);
 
   return (
-    <Page.Main>
+    <Page.Main style={{ display: "flex", flexDirection: "column", minHeight: "100%" }}>
       <Layouts.Root>
         <Layouts.Header
           id="title"
-          title="Import Export Data"
-          subtitle="Create, restore and schedule Strapi data transfers via the official `strapi export` / `strapi import` CLI."
+          title="Import / Export Data"
+          subtitle="Back up, restore and schedule your Strapi data."
         />
         <Layouts.Content>
           <Tabs.Root defaultValue={tabs[0].id} variant="simple">
-            <Tabs.List aria-label="Backup tabs">
-              {tabs.map((t) => (
-                <Tabs.Trigger key={t.id} value={t.id}>
-                  <Typography fontWeight="bold">{t.label}</Typography>
+            <Tabs.List aria-label="Import export data tabs">
+              {tabs.map(({ id, label, Icon }) => (
+                <Tabs.Trigger key={id} value={id}>
+                  <Flex gap={2} alignItems="center">
+                    <Icon />
+                    <Typography fontWeight="bold">{label}</Typography>
+                  </Flex>
                 </Tabs.Trigger>
               ))}
             </Tabs.List>
@@ -64,6 +69,15 @@ const HomePage = () => {
           </Tabs.Root>
         </Layouts.Content>
       </Layouts.Root>
+
+      <Box style={{ marginTop: "auto" }} paddingTop={6} paddingBottom={4}>
+        <Divider />
+        <Flex justifyContent="center" paddingTop={3}>
+          <Typography variant="pi" textColor="neutral500">
+            Import / Export Data · v{pkg.version}
+          </Typography>
+        </Flex>
+      </Box>
     </Page.Main>
   );
 };

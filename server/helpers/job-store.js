@@ -237,6 +237,13 @@ class FileJobStore {
           } catch (err) {
             safeWarn(`[import-export] failed to mark stuck job ${job.id}: ${err.message}`);
           }
+          // Release the mutex lock if it's still held by this abandoned job —
+          // otherwise the UI shows "a job is currently running" forever and
+          // blocks new uploads until LOCK_TTL_MS (30 min) elapses.
+          try {
+            const lock = readJson(lockPath());
+            if (lock && lock.jobId === job.id) fs.unlinkSync(lockPath());
+          } catch { /* ignore */ }
         }
       }
     }
