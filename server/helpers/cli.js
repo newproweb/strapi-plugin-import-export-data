@@ -89,9 +89,21 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog } = {}) =>
         NODE_ENV: "production",
         TESTING_MODE: "false",
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       shell: process.platform === "win32",
     });
+
+    // `strapi import` is interactive: it confirms data deletion and — for an
+    // archive exported from a different project — a schema-difference prompt.
+    // The child has no TTY, so any unanswered prompt hangs it until the parent
+    // times out the whole CLI run. `--force` covers some prompts but not the
+    // schema one on every Strapi version, so feed explicit "y" answers down
+    // stdin. Reaching this spawn already means the caller consented to the
+    // destructive import.
+    try {
+      child.stdin.write("y\n".repeat(10));
+      child.stdin.end();
+    } catch { /* stdin already closed — nothing to confirm */ }
 
     const sink = {
       stdout: "",

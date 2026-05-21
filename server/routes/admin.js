@@ -49,6 +49,12 @@ module.exports = {
     route("POST", "/backup/upload", "backupController.upload", "restore"),
     route("POST", "/backup/run-now", "backupController.runNow", "create"),
 
+    // Full-seed (schema + data) — recreates missing schema from the archive
+    route("GET", "/full-seed/pending", "backupController.fullSeedPending", "read"),
+    route("DELETE", "/full-seed/pending", "backupController.clearFullSeed", "restore"),
+    route("GET", "/full-seed/:file/plan", "backupController.fullSeedPlan", "restore"),
+    route("POST", "/full-seed/:file/sync", "backupController.fullSeedSync", "restore"),
+
     // Schedule/settings
     route("GET", "/backup-schedule", "backupController.getSchedule", "read"),
     route("POST", "/backup-schedule", "backupController.saveSchedule", "settings"),

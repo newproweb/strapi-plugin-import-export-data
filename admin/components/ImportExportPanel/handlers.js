@@ -8,15 +8,15 @@ export const deleteAction = async (file, { notify, reload }) => {
   await reload();
 };
 
-export const restoreAction = async (file, { exclude }) => {
-  const { jobId } = await restoreBackup(file, { exclude });
-  return jobId;
-};
+// Returns the raw restore response — either `{ jobId }` when the import
+// started, or `{ needsSchemaConfirm, schemaDiff }` when the archive schema
+// differs and the caller must confirm first.
+export const restoreAction = (file, options = {}) => restoreBackup(file, options);
 
-export const downloadAction = async (file, { notify }) => {
+export const downloadAction = async (file, { notify, onProgress }) => {
   try {
-    const response = await downloadBackup(file);
-    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+    const { data } = await downloadBackup(file, onProgress);
+    const blob = data instanceof Blob ? data : new Blob([data]);
     if (!blob.size) {
       // Belt-and-braces guard: if the response somehow arrives empty,
       // surface a clear error instead of silently saving a 0 KB archive.
@@ -42,20 +42,14 @@ export const stageUpload = async (file, key, { notify, reload, reset }) => {
   return staged;
 };
 
+// Uploads the archive, then asks the server to restore it. Returns the restore
+// response (`{ jobId }` or `{ needsSchemaConfirm, schemaDiff }`) plus the
+// staged file name so the caller can re-restore it after a schema confirm
+// without re-uploading.
 export const importUpload = async (file, key, { notify, reload }) => {
   const staged = await uploadBackup(file, { key: key || undefined });
   await reload();
-  notify({
-    type: "info",
-    message: "File uploaded. Starting `strapi import --force` now — opening live progress…",
-  });
+  notify({ type: "info", message: "File uploaded — checking schema…" });
   const response = await restoreBackup(staged.file, { key: key || undefined });
-  const jobId = response?.jobId;
-  if (!jobId) {
-    throw new Error(
-      `Server did not return a jobId. Raw response: ${JSON.stringify(response)}. `
-      + "Make sure Strapi has been restarted so the new routes are registered."
-    );
-  }
-  return jobId;
+  return { ...response, stagedFile: staged.file };
 };

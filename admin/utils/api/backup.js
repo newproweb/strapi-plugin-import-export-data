@@ -28,11 +28,12 @@ export const restoreBackup = async (file, options = {}) => {
   return data?.data;
 };
 
-export const downloadBackup = async (file) => {
+export const downloadBackup = async (file, onProgress) => {
   // Strapi v5's `getFetchClient` always runs the response through `.json()` and
   // returns `{ data: [] }` on parse error — that turns every binary download
-  // into a 0 KB file. Bypass it and use native fetch so we can read the body
-  // as a Blob directly.
+  // into a 0 KB file. Bypass it and use native fetch so we can stream the body
+  // and report progress instead of blocking silently until the whole archive
+  // has buffered into memory.
   const url = `${getBackendUrl()}${basePath}/backup/${encoded(file)}/download`;
   const token = readAuthToken();
   const response = await fetch(url, {
@@ -55,9 +56,21 @@ export const downloadBackup = async (file) => {
     throw err;
   }
 
-  const blob = await response.blob();
-  const headerName = response.headers.get("content-disposition") || "";
-  return { data: blob, headers: { "content-disposition": headerName } };
+  const total = Number(response.headers.get("content-length")) || 0;
+  const reader = response.body?.getReader?.();
+  if (!reader) return { data: await response.blob() };
+
+  const chunks = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (onProgress) onProgress(received, total);
+  }
+
+  return { data: new Blob(chunks) };
 };
 
 export const uploadBackup = async (file, { key = "" } = {}) => {
@@ -73,4 +86,27 @@ export const getBackupLimits = async () => {
   const { get } = getFetchClient();
   const { data } = await get(`${basePath}/backup/limits`);
   return data?.data ?? { maxFileSize: 0, busy: false };
+};
+
+export const fullSeedPlan = async (file) => {
+  const { get } = getFetchClient();
+  const { data } = await get(`${basePath}/full-seed/${encoded(file)}/plan`);
+  return data?.data;
+};
+
+export const fullSeedSync = async (file) => {
+  const { post } = getFetchClient();
+  const { data } = await post(`${basePath}/full-seed/${encoded(file)}/sync`, {});
+  return data?.data;
+};
+
+export const getFullSeedPending = async () => {
+  const { get } = getFetchClient();
+  const { data } = await get(`${basePath}/full-seed/pending`);
+  return data?.data ?? null;
+};
+
+export const clearFullSeedPending = async () => {
+  const { del } = getFetchClient();
+  await del(`${basePath}/full-seed/pending`);
 };

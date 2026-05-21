@@ -8,6 +8,10 @@ const { pickMultipartFile, readableUploadPath, uploadOriginalName } = require(".
 const { pickDownloadMime } = require("../helpers/mime");
 const { buildSchedulePatch, toPublicConfig, toSavedConfig } = require("../helpers/config-shape");
 const { buildBackupCreateOpts, buildRestoreOpts } = require("../helpers/query-opts");
+const { diffArchiveSchema, readArchiveSchemas } = require("../helpers/schema-diff");
+const {
+  planFullSeed, writeSchemaFiles, writePendingSeed, readPendingSeed, clearPendingSeed,
+} = require("../helpers/schema-writer");
 const { readStrapiBodyLimit, formatBytes } = require("../helpers/body-limit");
 const { isBusy, currentLabel, current } = require("../helpers/job-mutex");
 
@@ -86,10 +90,20 @@ module.exports = ({ strapi }) => ({
     const { backup, store } = services();
     try {
       const cfg = await store.read();
-      const jobId = backup.restoreBackupJob(
-        ctx.params.file,
-        buildRestoreOpts(ctx.request.body || {}, cfg),
-      );
+      const opts = buildRestoreOpts(ctx.request.body || {}, cfg);
+
+      // Pre-flight: a cross-project archive whose schema differs from this
+      // instance silently drops data for the missing types. Surface the diff
+      // and let the user decide before the destructive import is spawned.
+      if (!opts.confirmSchemaChange) {
+        const diff = await diffArchiveSchema(backup.getBackupPath(ctx.params.file), strapi);
+        if (diff.hasDifferences) {
+          ctx.body = { data: { needsSchemaConfirm: true, schemaDiff: diff.summary } };
+          return;
+        }
+      }
+
+      const jobId = backup.restoreBackupJob(ctx.params.file, opts);
       ctx.body = { data: { jobId } };
     } catch (error) {
       strapi.log.error("[import-export:backup.restore]", error);
@@ -188,5 +202,54 @@ module.exports = ({ strapi }) => ({
       strapi.log.error("[import-export:backup.runNow]", error);
       fail(ctx, 500, error, "Scheduled backup run failed");
     }
+  },
+
+  // Full-seed step 1 — reports which content-types/components an archive
+  // would create in src/ and which plugin types it cannot recreate.
+  async fullSeedPlan(ctx) {
+    try {
+      const schemas = await readArchiveSchemas(services().backup.getBackupPath(ctx.params.file));
+      if (!schemas || schemas.length === 0) {
+        ctx.status = 422;
+        ctx.body = { error: { status: 422, name: "NoSchemas", message: "Could not read content-type schemas from the archive." } };
+        return;
+      }
+      ctx.body = { data: planFullSeed(schemas, strapi) };
+    } catch (error) {
+      strapi.log.error("[import-export:full-seed.plan]", error);
+      fail(ctx, pickStatus(error, 500), error, "Could not analyze archive");
+    }
+  },
+
+  // Full-seed step 2 — writes the missing api/component schema files into
+  // src/. The src/ change makes `strapi develop` restart and create the
+  // tables; a marker file lets the UI resume with the data import after.
+  async fullSeedSync(ctx) {
+    try {
+      const schemas = await readArchiveSchemas(services().backup.getBackupPath(ctx.params.file));
+      if (!schemas || schemas.length === 0) {
+        ctx.status = 422;
+        ctx.body = { error: { status: 422, name: "NoSchemas", message: "Could not read content-type schemas from the archive." } };
+        return;
+      }
+      const created = writeSchemaFiles(schemas, strapi);
+      writePendingSeed({ archive: ctx.params.file, createdAt: Date.now(), created });
+      strapi.log.info(
+        `[import-export] [full-seed] created ${created.contentTypes.length} content-type(s) + ${created.components.length} component(s) in src/ — Strapi will restart to pick them up`,
+      );
+      ctx.body = { data: { created, willRestart: true } };
+    } catch (error) {
+      strapi.log.error("[import-export:full-seed.sync]", error);
+      fail(ctx, pickStatus(error, 500), error, "Schema sync failed");
+    }
+  },
+
+  async fullSeedPending(ctx) {
+    ctx.body = { data: readPendingSeed() };
+  },
+
+  async clearFullSeed(ctx) {
+    clearPendingSeed();
+    ctx.body = { data: { ok: true } };
   },
 });

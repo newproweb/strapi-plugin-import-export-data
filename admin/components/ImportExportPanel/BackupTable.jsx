@@ -15,19 +15,32 @@ const FlagBadges = ({ row }) => (
   </Flex>
 );
 
-const RowActions = ({ file, working, onDownload, onRestore, onDelete }) => (
-  <Flex gap={2}>
-    <Button size="S" variant="tertiary" startIcon={<Download />} onClick={() => onDownload(file)}>
-      Download
-    </Button>
-    <Button size="S" variant="secondary" onClick={() => onRestore(file)} disabled={working}>
-      Restore
-    </Button>
-    <Button size="S" variant="danger-light" startIcon={<Trash />} onClick={() => onDelete(file)} disabled={working}>
-      Delete
-    </Button>
-  </Flex>
-);
+const RowActions = ({ file, working, downloading, onDownload, onRestore, onDelete }) => {
+  const isDownloading = downloading?.file === file;
+  const downloadLabel = isDownloading
+    ? (downloading.percent > 0 ? `${downloading.percent}%` : "Downloading…")
+    : "Download";
+  return (
+    <Flex gap={2}>
+      <Button
+        size="S"
+        variant="tertiary"
+        startIcon={isDownloading ? undefined : <Download />}
+        loading={isDownloading}
+        disabled={Boolean(downloading)}
+        onClick={() => onDownload(file)}
+      >
+        {downloadLabel}
+      </Button>
+      <Button size="S" variant="secondary" onClick={() => onRestore(file)} disabled={working}>
+        Restore
+      </Button>
+      <Button size="S" variant="danger-light" startIcon={<Trash />} onClick={() => onDelete(file)} disabled={working}>
+        Delete
+      </Button>
+    </Flex>
+  );
+};
 
 const EmptyState = () => (
   <Flex direction="column" alignItems="center" padding={6} gap={2}>
@@ -36,7 +49,7 @@ const EmptyState = () => (
   </Flex>
 );
 
-const BackupTable = ({ rows, loading, working, onReload, onDownload, onRestore, onDelete }) => (
+const BackupTable = ({ rows, loading, working, downloading, onReload, onDownload, onRestore, onDelete }) => (
   <>
     <Flex justifyContent="space-between" alignItems="center" paddingBottom={3}>
       <Typography variant="beta">Backups</Typography>
@@ -79,6 +92,7 @@ const BackupTable = ({ rows, loading, working, onReload, onDownload, onRestore, 
                 <RowActions
                   file={row.file}
                   working={working}
+                  downloading={downloading}
                   onDownload={onDownload}
                   onRestore={onRestore}
                   onDelete={onDelete}

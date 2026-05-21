@@ -6,6 +6,7 @@ const services = require("./services");
 const controllers = require("./controllers");
 const { recoverPending } = require("./helpers/pad-tracker");
 const { getJobStore } = require("./helpers/job-store");
+const { knex, dialect, isSqlite } = require("./helpers/dialect");
 const { PLUGIN_ACTIONS, PLUGIN } = require("./constants/permissions");
 
 const registerPermissions = async ({ strapi }) => {
@@ -29,6 +30,27 @@ module.exports = {
   },
 
   async bootstrap({ strapi }) {
+    // SQLite allows a single writer and blocks readers in the default DELETE
+    // journal mode. During a long `strapi import` CLI run that writer lock
+    // stalls the live server's admin-auth reads (strapi_sessions) until they
+    // time out with "database is locked". WAL lets readers proceed against the
+    // last committed snapshot while the import writes. journal_mode is a
+    // persistent file property, so the spawned CLI child inherits it too.
+    // busy_timeout is kept short: better-sqlite3 is synchronous, so a write
+    // that waits out the timeout blocks the whole Node event loop. WAL already
+    // keeps reads non-blocking, so a contending write should fail fast and let
+    // the caller move on rather than freeze the admin for tens of seconds.
+    const db = knex();
+    if (db && isSqlite(dialect(db))) {
+      try {
+        await db.raw("PRAGMA journal_mode = WAL");
+        await db.raw("PRAGMA busy_timeout = 5000");
+        strapi.log.info("[import-export] SQLite tuned: journal_mode=WAL + busy_timeout=5000ms — admin reads stay alive during long CLI imports");
+      } catch (error) {
+        strapi.log.warn(`[import-export] SQLite WAL setup failed: ${error.message}`);
+      }
+    }
+
     try {
       const { scanned, removed, skipped } = recoverPending();
       if (skipped === "owner-alive") {

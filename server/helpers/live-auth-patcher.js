@@ -1,7 +1,7 @@
 "use strict";
 
 const { BASE_AUTH_TABLES } = require("../constants/auth");
-const { knex, setFkEnabled } = require("./dialect");
+const { knex, dialect, isSqlite, setFkEnabled } = require("./dialect");
 
 const CORE_STORE_TABLE = "strapi_core_store_settings";
 
@@ -127,6 +127,17 @@ const runPatchTick = async (snapshot, errorBucket) => {
  */
 const startLiveAuthPatcher = (snapshot, emit, { intervalMs = DEFAULT_INTERVAL_MS } = {}) => {
   if (!snapshot) return { stop: () => {} };
+
+  // SQLite: better-sqlite3 is synchronous and allows a single writer. The
+  // patcher's per-tick UPSERT would block the Node event loop waiting for the
+  // import CLI to release the write lock — freezing the admin (job polling,
+  // HTTP) for the whole import. Skip it; admin auth is replayed from the
+  // pre-restore snapshot afterwards (re-login if prompted).
+  const db = knex();
+  if (db && isSqlite(dialect(db))) {
+    emit?.("[live-auth] patcher SKIPPED on SQLite — its writes would contend with the import and freeze the dev server; auth is restored from the snapshot after the import");
+    return { stop: () => {} };
+  }
 
   emit?.(`[live-auth] patcher ACTIVE — will UPSERT (insert or replace) admin auth rows every ${intervalMs}ms so admin API requests keep returning 200 during the CLI import (cross-server safe)`);
 

@@ -44,6 +44,7 @@ const buildRestoreOpts = (body, cfg) => ({
   key: body.key || cfg.encryptionKey || undefined,
   exclude: body.exclude || undefined,
   preRestoreSnapshot: body.preRestoreSnapshot === undefined ? cfg.preRestoreSnapshot !== false : isTruthy(body.preRestoreSnapshot),
+  confirmSchemaChange: isTruthy(body.confirmSchemaChange),
 });
 
 module.exports = {

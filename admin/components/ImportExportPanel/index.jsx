@@ -13,7 +13,9 @@ import RunningJobsBanner from "./RunningJobsBanner";
 import ExportCard from "./ExportCard";
 import UploadDropzone from "./UploadDropzone";
 import BackupTable from "./BackupTable";
+import FullSeedCard from "./FullSeedCard";
 import ConfirmDialog from "./ConfirmDialog";
+import SchemaConfirmDialog from "./SchemaConfirmDialog";
 import { deleteAction, restoreAction, downloadAction, stageUpload, importUpload } from "./handlers";
 
 const ImportExportPanel = () => {
@@ -27,6 +29,8 @@ const ImportExportPanel = () => {
   const [exportOpen, setExportOpen] = useState(false);
   const [restoreExcludeFiles, setRestoreExcludeFiles] = useState(false);
   const [progressJob, setProgressJob] = useState(null);
+  const [downloading, setDownloading] = useState(null);
+  const [schemaConfirm, setSchemaConfirm] = useState(null);
 
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadKey, setUploadKey] = useState("");
@@ -88,16 +92,33 @@ const ImportExportPanel = () => {
     }
   };
 
+  // Routes a restore response: a schema mismatch opens the confirm dialog,
+  // otherwise the import job's live progress opens. Returns true when a
+  // confirmation is pending so callers skip their success cleanup.
+  const applyRestoreResponse = (res, file, options) => {
+    if (res?.needsSchemaConfirm) {
+      setSchemaConfirm({ file, diff: res.schemaDiff, options });
+      return true;
+    }
+    if (!res?.jobId) {
+      throw new Error(
+        `Server did not return a jobId. Raw response: ${JSON.stringify(res)}. `
+        + "Make sure Strapi has been restarted so the new routes are registered.",
+      );
+    }
+    setProgressJob({ jobId: res.jobId, type: "import" });
+    refreshRunningJobs();
+    return false;
+  };
+
   const onRestore = async (file) => {
     setWorking(true);
+    const options = { exclude: restoreExcludeFiles ? "files" : undefined };
     try {
-      const jobId = await restoreAction(file, {
-        exclude: restoreExcludeFiles ? "files" : undefined,
-      });
-      setProgressJob({ jobId, type: "import" });
-      refreshRunningJobs();
+      const res = await restoreAction(file, options);
+      const pending = applyRestoreResponse(res, file, options);
       setConfirm(null);
-      setRestoreExcludeFiles(false);
+      if (!pending) setRestoreExcludeFiles(false);
     } catch (e) {
       notify({ type: "danger", message: readServerError(e) });
     } finally {
@@ -105,7 +126,34 @@ const ImportExportPanel = () => {
     }
   };
 
-  const onDownload = (file) => downloadAction(file, { notify });
+  const onSchemaConfirm = async () => {
+    if (!schemaConfirm) return;
+    const { file, options } = schemaConfirm;
+    setWorking(true);
+    try {
+      const res = await restoreAction(file, { ...options, confirmSchemaChange: true });
+      applyRestoreResponse(res, file, options);
+      setSchemaConfirm(null);
+      setRestoreExcludeFiles(false);
+      resetUpload();
+    } catch (e) {
+      notify({ type: "danger", message: readServerError(e) });
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const onDownload = useCallback((file) => {
+    if (downloading) return undefined;
+    setDownloading({ file, percent: 0 });
+    return downloadAction(file, {
+      notify,
+      onProgress: (received, total) => {
+        const percent = total ? Math.round((received / total) * 100) : 0;
+        setDownloading((prev) => (prev && prev.percent === percent ? prev : { file, percent }));
+      },
+    }).finally(() => setDownloading(null));
+  }, [downloading, notify]);
 
   const warnMissingFile = () => {
     notify({
@@ -137,10 +185,9 @@ const ImportExportPanel = () => {
     if (!assertUploadable(uploadFile)) return;
     setWorking(true);
     try {
-      const jobId = await importUpload(uploadFile, uploadKey, { notify, reload });
-      setProgressJob({ jobId, type: "import" });
-      refreshRunningJobs();
-      resetUpload();
+      const res = await importUpload(uploadFile, uploadKey, { notify, reload });
+      const pending = applyRestoreResponse(res, res.stagedFile, { key: uploadKey || undefined });
+      if (!pending) resetUpload();
     } catch (e) {
       notify({ type: "danger", message: readServerError(e) });
     } finally {
@@ -185,10 +232,21 @@ const ImportExportPanel = () => {
         />
       </Flex>
 
+      <Box paddingBottom={5}>
+        <FullSeedCard
+          notify={notify}
+          onStartJob={(jobId) => {
+            setProgressJob({ jobId, type: "import" });
+            refreshRunningJobs();
+          }}
+        />
+      </Box>
+
       <BackupTable
         rows={rows}
         loading={loading}
         working={working}
+        downloading={downloading}
         onReload={reload}
         onDownload={onDownload}
         onRestore={(file) => setConfirm({ type: "restore", file })}
@@ -222,6 +280,13 @@ const ImportExportPanel = () => {
         onClose={() => setConfirm(null)}
         onToggleExclude={setRestoreExcludeFiles}
         onConfirm={handleConfirm}
+      />
+
+      <SchemaConfirmDialog
+        confirm={schemaConfirm}
+        working={working}
+        onClose={() => setSchemaConfirm(null)}
+        onConfirm={onSchemaConfirm}
       />
     </Box>
   );

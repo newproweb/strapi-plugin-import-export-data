@@ -47,7 +47,10 @@ const assertTarIntegrity = (filePath) => {
   if (isEncrypted(filePath)) return { skipped: "encrypted" };
 
   const flags = isGzipped(filePath) ? "-tzf" : "-tf";
-  const result = spawnSync("tar", [flags, filePath], { encoding: "utf8" });
+  const result = spawnSync("tar", [flags, path.basename(filePath)], {
+    cwd: path.dirname(filePath),
+    encoding: "utf8",
+  });
   if (result.error) {
     strapi.log.warn(`[import-export] tar integrity check skipped (${result.error.message}) — falling back to size-only check`);
     return { skipped: "tar-not-available" };
