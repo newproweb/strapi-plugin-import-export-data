@@ -5,9 +5,7 @@ const { knex, dialect, isSqlite, setFkEnabled } = require("./dialect");
 
 const CORE_STORE_TABLE = "strapi_core_store_settings";
 
-const DEFAULT_INTERVAL_MS = 500;
-
-const HEARTBEAT_EVERY_N_TICKS = 20;
+const DEFAULT_INTERVAL_MS = 3000;
 
 const ERROR_LOG_THROTTLE = 5;
 
@@ -109,18 +107,45 @@ const runPatchTick = async (snapshot, errorBucket) => {
 };
 
 /**
- * While `strapi import --force` runs, it wipes and replaces `admin_users`,
- * `admin_permissions`, `strapi_api_tokens`, `strapi_sessions`, etc. with
- * the archive's contents — which evicts the currently logged-in admin and
- * makes Strapi's admin API (`/admin/users/me`, `/admin/users/me/permissions`)
- * return 401 for the duration of the import (10+ minutes for large archives).
+ * Picks the sentinel used to detect whether the import has wiped admin auth:
+ * the first snapshot `admin_users` row. Its `id` plus `email` tell our admin
+ * apart from any same-id user a cross-server archive might insert.
  *
- * This patcher re-injects the admin auth rows captured before the CLI
- * started, every `intervalMs`, so the admin session keeps working during
- * the import. The CLI may wipe them again — the next tick re-inserts.
+ * @returns {{ id: any, email: any } | null} null when the snapshot has no users.
+ */
+const authSentinel = (snapshot) => {
+  const first = snapshot.tables?.admin_users?.[0];
+  if (!first || first.id === undefined) return null;
+  return { id: first.id, email: first.email };
+};
+
+/**
+ * One indexed single-row read. True when our admin user is gone, or present
+ * under the same id but a different email — either means the import wiped or
+ * replaced auth and the snapshot is due to be re-injected.
+ */
+const authReinjectDue = async (db, sentinel) => {
+  const row = await db("admin_users").where({ id: sentinel.id }).first("email");
+  if (!row) return true;
+  return sentinel.email !== undefined && row.email !== sentinel.email;
+};
+
+/**
+ * While `strapi import --force` runs it wipes and replaces `admin_users`,
+ * `strapi_sessions`, `strapi_api_tokens`, etc. with the archive's contents,
+ * which 401s the logged-in admin for the whole import.
  *
- * @param {object|null} snapshot  Output of `takeAuthSnapshot`. If null or
- *   falsy, this is a no-op — returns a `stop()` that does nothing.
+ * Each tick does ONE cheap single-row read and re-injects the captured auth
+ * snapshot only when that read shows the rows were wiped. A long import costs
+ * ~one indexed read per `intervalMs` plus a re-inject per wipe — not a blind
+ * UPSERT of every auth row on every tick, which during a heavy import piled
+ * host-process writes onto an already-saturated DB.
+ *
+ * Postgres and MySQL only. SQLite is skipped: better-sqlite3 is synchronous,
+ * so even the read tick would block the event loop against the import's write
+ * lock. SQLite auth is restored from the pre-restore snapshot afterwards.
+ *
+ * @param {object|null} snapshot  Output of `takeAuthSnapshot`. Falsy → no-op.
  * @param {(line: string) => void} [emit]  Log sink for user-visible lines.
  * @param {{ intervalMs?: number }} [options]
  * @returns {{ stop: () => void }}
@@ -128,59 +153,61 @@ const runPatchTick = async (snapshot, errorBucket) => {
 const startLiveAuthPatcher = (snapshot, emit, { intervalMs = DEFAULT_INTERVAL_MS } = {}) => {
   if (!snapshot) return { stop: () => {} };
 
-  // SQLite: better-sqlite3 is synchronous and allows a single writer. The
-  // patcher's per-tick UPSERT would block the Node event loop waiting for the
-  // import CLI to release the write lock — freezing the admin (job polling,
-  // HTTP) for the whole import. Skip it; admin auth is replayed from the
-  // pre-restore snapshot afterwards (re-login if prompted).
   const db = knex();
   if (db && isSqlite(dialect(db))) {
     emit?.("[live-auth] patcher SKIPPED on SQLite — its writes would contend with the import and freeze the dev server; auth is restored from the snapshot after the import");
     return { stop: () => {} };
   }
 
-  emit?.(`[live-auth] patcher ACTIVE — will UPSERT (insert or replace) admin auth rows every ${intervalMs}ms so admin API requests keep returning 200 during the CLI import (cross-server safe)`);
+  const sentinel = authSentinel(snapshot);
+  if (!sentinel) {
+    emit?.("[live-auth] patcher SKIPPED — snapshot captured no admin users to preserve");
+    return { stop: () => {} };
+  }
+
+  emit?.(`[live-auth] patcher ACTIVE — checking admin auth every ${intervalMs}ms, re-injecting only when the import has wiped it (Postgres/MySQL, cross-server safe)`);
 
   let stopped = false;
   let stopAnnounced = false;
   let cumulativePatched = 0;
-  let ticksRun = 0;
+  let checksRun = 0;
+  let reinjections = 0;
   let lastTickBusy = false;
   let errorsLogged = 0;
   const errorCounts = new Map();
 
   const tick = async () => {
-    if (stopped) return;
-    if (lastTickBusy) return;
-    // The 500ms timer can fire while `strapi develop` is mid-reload (chokidar
-    // file-watch swap) — global.strapi is briefly undefined, and any throw
-    // here becomes an unhandledRejection that terminates Node 20+. Guard it.
+    if (stopped || lastTickBusy) return;
     if (typeof strapi === "undefined" || !strapi || !strapi.db) return;
     lastTickBusy = true;
 
     const errorBucket = [];
-
     try {
+      const conn = knex();
+      if (!conn) return;
+      checksRun += 1;
+
+      let due;
+      try {
+        due = await authReinjectDue(conn, sentinel);
+      } catch {
+        return;
+      }
+      if (!due) return;
+
       const patched = await runPatchTick(snapshot, errorBucket);
-      ticksRun += 1;
+      reinjections += 1;
       if (patched > 0) cumulativePatched += patched;
 
       for (const { table, message } of errorBucket) {
         const key = `${table}: ${message}`;
-        const count = (errorCounts.get(key) || 0) + 1;
-        errorCounts.set(key, count);
+        errorCounts.set(key, (errorCounts.get(key) || 0) + 1);
         if (errorsLogged < ERROR_LOG_THROTTLE) {
           emit?.(`[live-auth] ${table} write skipped — ${message}`);
           errorsLogged += 1;
         }
       }
-
-      if (ticksRun % HEARTBEAT_EVERY_N_TICKS === 0) {
-        const errorSummary = errorCounts.size === 0
-          ? ""
-          : ` (errors so far: ${[...errorCounts.entries()].map(([k, c]) => `${c}× ${k}`).join("; ")})`;
-        emit?.(`[live-auth] ${ticksRun} tick(s) run, ${cumulativePatched} row(s) re-injected so far${errorSummary}`);
-      }
+      emit?.(`[live-auth] import wiped admin auth — re-injected ${patched} row(s) (re-inject #${reinjections})`);
     } catch (err) {
       emit?.(`[live-auth] tick failed: ${err && err.message ? err.message : String(err)}`);
     } finally {
@@ -200,7 +227,7 @@ const startLiveAuthPatcher = (snapshot, emit, { intervalMs = DEFAULT_INTERVAL_MS
       const errorSummary = errorCounts.size === 0
         ? ""
         : ` (errors during run: ${[...errorCounts.entries()].map(([k, c]) => `${c}× ${k}`).join("; ")})`;
-      emit?.(`[live-auth] stopped — ${ticksRun} tick(s), ${cumulativePatched} row(s) re-injected during the CLI run${errorSummary}`);
+      emit?.(`[live-auth] stopped — ${checksRun} check(s) run, ${reinjections} re-inject(s), ${cumulativePatched} row(s) re-injected total${errorSummary}`);
     },
   };
 };
