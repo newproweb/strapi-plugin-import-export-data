@@ -14,6 +14,7 @@ const {
 } = require("../helpers/schema-writer");
 const { readStrapiBodyLimit, formatBytes } = require("../helpers/body-limit");
 const { isBusy, currentLabel, current } = require("../helpers/job-mutex");
+const { resolveTransfer, transferBackup } = require("../helpers/transfer");
 
 const fail = (ctx, status, error, fallback) => {
   ctx.status = status;
@@ -84,6 +85,62 @@ module.exports = ({ strapi }) => ({
       ctx.res.destroy(err);
     });
     ctx.body = fileStream;
+  },
+
+  // Public, token-gated download — the target of a shared transfer link. No
+  // admin session: the token (and its expiry) is the only credential.
+  async transferDownload(ctx) {
+    const resolved = resolveTransfer(ctx.params.token);
+    if (!resolved) {
+      ctx.status = 404;
+      ctx.body = { error: { status: 404, name: "TransferLinkInvalid", message: "This download link is invalid or has expired." } };
+      return;
+    }
+
+    let filePath;
+    let stats;
+    try {
+      filePath = services().backup.getBackupPath(resolved.file);
+      stats = fs.statSync(filePath);
+    } catch {
+      ctx.status = 404;
+      ctx.body = { error: { status: 404, name: "BackupNotFound", message: "The shared archive is no longer available." } };
+      return;
+    }
+
+    const safeName = String(resolved.file).replace(/"/g, "");
+    ctx.set("Content-Type", pickDownloadMime(resolved.file));
+    ctx.set("Content-Disposition", `attachment; filename="${safeName}"`);
+    ctx.set("Content-Length", String(stats.size));
+    ctx.set("Cache-Control", "no-store");
+    ctx.status = 200;
+
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.on("error", (err) => {
+      strapi.log.error(`[import-export:transfer.download] read failed: ${err.message}`);
+      ctx.res.destroy(err);
+    });
+    ctx.body = fileStream;
+  },
+
+  // Creates a time-limited download link for a backup and emails it to the
+  // given addresses and/or the recipients saved in plugin settings.
+  async transfer(ctx) {
+    try {
+      const body = ctx.request.body || {};
+      const cfg = await services().store.read();
+      const recipients = [];
+      if (body.emails) recipients.push(body.emails);
+      if (body.useSettingsRecipients && Array.isArray(cfg.transferRecipients)) {
+        recipients.push(...cfg.transferRecipients);
+      }
+      const baseUrl = ctx.request.origin || strapi.config.get("server.url") || "";
+      const result = await transferBackup({ fileName: ctx.params.file, recipients, baseUrl });
+      ctx.body = { data: result };
+    } catch (error) {
+      strapi.log.error("[import-export:backup.transfer]", error);
+      fail(ctx, pickStatus(error, 500), error, "Transfer failed");
+    }
   },
 
   async restore(ctx) {

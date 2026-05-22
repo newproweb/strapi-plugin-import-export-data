@@ -1,5 +1,7 @@
 "use strict";
 
+const { normalizeRecipients } = require("./transfer");
+
 const MASKED_KEY = "••••••";
 
 const assignIfString = (target, source, key) => {
@@ -20,6 +22,7 @@ const buildSchedulePatch = (body) => {
   assignIfDefined(patch, body, "autoExcludeFiles", Boolean);
   assignIfDefined(patch, body, "adoptOrphans", Boolean);
   assignIfDefined(patch, body, "preRestoreSnapshot", Boolean);
+  assignIfDefined(patch, body, "transferRecipients", normalizeRecipients);
   return patch;
 };
 
@@ -33,6 +36,7 @@ const toPublicConfig = (cfg) => ({
   autoExcludeFiles: cfg.autoExcludeFiles,
   adoptOrphans: Boolean(cfg.adoptOrphans),
   preRestoreSnapshot: cfg.preRestoreSnapshot !== false,
+  transferRecipients: Array.isArray(cfg.transferRecipients) ? cfg.transferRecipients : [],
   lastBackupAt: cfg.lastBackupAt || null,
 });
 

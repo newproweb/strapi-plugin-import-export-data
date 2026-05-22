@@ -60,9 +60,18 @@ module.exports = {
       config: { auth: false, policies: [] },
     },
 
+    // Public, time-limited download link (token-gated) — for sharing a backup.
+    {
+      method: "GET",
+      path: "/backup/transfer/:token",
+      handler: "backupController.transferDownload",
+      config: { auth: false, policies: [] },
+    },
+
     // Destructive actions — require individual permissions
     route("DELETE", "/backup/:file", "backupController.remove", "delete"),
     route("GET", "/backup/:file/download", "backupController.download", "download"),
+    route("POST", "/backup/:file/transfer", "backupController.transfer", "download"),
     route("POST", "/backup/:file/restore", "backupController.restore", "restore"),
     route("POST", "/backup/upload", "backupController.upload", "restore"),
     route("POST", "/backup/run-now", "backupController.runNow", "create"),

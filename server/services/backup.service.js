@@ -19,6 +19,7 @@ const { makeLogEmitter } = require("../helpers/emitter");
 const { describeArchive } = require("../helpers/archive-describe");
 const { runInBackground } = require("../helpers/background-job");
 const { requestJobAbort } = require("../helpers/job-store");
+const { autoSendPreRestore } = require("../helpers/transfer");
 const { validateArchive } = require("../helpers/archive-validate");
 const { assertSizeWithinLimit } = require("../helpers/body-limit");
 const { startAssetProgressMonitor } = require("../helpers/asset-progress-monitor");
@@ -176,6 +177,10 @@ const restoreBackup = async (
     }
   } else {
     emit(`[safeguard] pre-restore snapshot SKIPPED (setting disabled) — current DB will be overwritten`);
+  }
+
+  if (preSnapshot && preSnapshot.file) {
+    await autoSendPreRestore(preSnapshot.file, emit);
   }
 
   const snapshot = preserveAuth ? await takeAuthSnapshot(emit) : null;
