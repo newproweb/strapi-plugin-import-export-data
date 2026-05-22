@@ -97,7 +97,7 @@ const detectFullSnapshotWillFail = async () => {
 
 const runDbOnlySnapshot = async (bridge) => createBackup({ encrypt: false, compress: true, exclude: "files", prefix: "pre-restore-dbonly", adoptOrphans: false }, bridge);
 
-const makePreRestoreSnapshot = async (emit, onLog) => {
+const makePreRestoreSnapshot = async (emit, onLog, { mode = "full" } = {}) => {
   emit(`[safeguard] creating pre-restore snapshot before import…`);
   const bridge = (evt) => {
     if (!onLog) return;
@@ -110,6 +110,13 @@ const makePreRestoreSnapshot = async (emit, onLog) => {
     if (!line) return;
     onLog({ stream: evt.stream || "stdout", line: `[pre-restore] ${line}` });
   };
+
+  if (mode === "db-only") {
+    emit(`[safeguard] DB-only snapshot mode — assets are NOT backed up (faster restore; rollback covers data only)`);
+    const dbOnly = await runDbOnlySnapshot(bridge);
+    emit(`[safeguard] DB-only snapshot created: ${dbOnly.file}`);
+    return dbOnly;
+  }
 
   const precheck = await detectFullSnapshotWillFail();
   if (precheck.willFail) {
@@ -147,7 +154,7 @@ const makePreRestoreSnapshot = async (emit, onLog) => {
 
 const restoreBackup = async (
   fileName,
-  { key, exclude, preserveAuth = true, preRestoreSnapshot = true, deepValidate = false } = {},
+  { key, exclude, preserveAuth = true, preRestoreSnapshot = "full", deepValidate = false } = {},
   onLog,
 ) => {
   const filePath = getBackupPath(fileName);
@@ -157,9 +164,9 @@ const restoreBackup = async (
   assertSizeWithinLimit(validation.size, fileName);
 
   let preSnapshot = null;
-  if (preRestoreSnapshot) {
+  if (preRestoreSnapshot !== "off") {
     try {
-      preSnapshot = await makePreRestoreSnapshot(emit, onLog);
+      preSnapshot = await makePreRestoreSnapshot(emit, onLog, { mode: preRestoreSnapshot });
     } catch (err) {
       throw new Error(
         `pre-restore snapshot failed (${err.message}) — aborting import to protect current DB. `

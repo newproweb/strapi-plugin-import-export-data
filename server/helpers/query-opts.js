@@ -40,10 +40,22 @@ const buildBackupCreateOpts = (body, cfg) => {
   };
 };
 
+/**
+ * Resolves the pre-restore snapshot mode from the request body, falling back
+ * to the saved config. Accepts the legacy boolean (true → "full", false →
+ * "off") plus the explicit "db-only" mode that skips the asset re-export.
+ */
+const resolveSnapshotMode = (body, cfg) => {
+  const raw = body.preRestoreSnapshot !== undefined ? body.preRestoreSnapshot : cfg.preRestoreSnapshot;
+  if (raw === false || raw === "false" || raw === "off") return "off";
+  if (raw === "db-only" || raw === "dbonly") return "db-only";
+  return "full";
+};
+
 const buildRestoreOpts = (body, cfg) => ({
   key: body.key || cfg.encryptionKey || undefined,
   exclude: body.exclude || undefined,
-  preRestoreSnapshot: body.preRestoreSnapshot === undefined ? cfg.preRestoreSnapshot !== false : isTruthy(body.preRestoreSnapshot),
+  preRestoreSnapshot: resolveSnapshotMode(body, cfg),
   confirmSchemaChange: isTruthy(body.confirmSchemaChange),
   deepValidate: isTruthy(body.deepValidate),
 });
