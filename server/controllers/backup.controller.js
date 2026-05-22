@@ -30,7 +30,7 @@ module.exports = ({ strapi }) => ({
     try {
       const cfg = await store.read();
       const jobId = backup.createBackupJob(buildBackupCreateOpts(ctx.request.body || {}, cfg));
-      ctx.body = { data: { jobId } };
+      ctx.body = { data: { jobId, token: backup.getJobToken(jobId) } };
     } catch (error) {
       strapi.log.error("[import-export:backup.create]", error);
       fail(ctx, pickStatus(error, 500), error, "Backup failed to start");
@@ -104,7 +104,7 @@ module.exports = ({ strapi }) => ({
       }
 
       const jobId = backup.restoreBackupJob(ctx.params.file, opts);
-      ctx.body = { data: { jobId } };
+      ctx.body = { data: { jobId, token: backup.getJobToken(jobId) } };
     } catch (error) {
       strapi.log.error("[import-export:backup.restore]", error);
       fail(ctx, pickStatus(error, 500), error, "Restore failed to start");
@@ -129,6 +129,26 @@ module.exports = ({ strapi }) => ({
       return;
     }
     ctx.body = { data: job };
+  },
+
+  // DB-independent progress poll — authenticated by the per-job token instead
+  // of an admin session, so the modal keeps polling while an import has wiped
+  // the auth tables. Reads job state from the file store, never the DB.
+  async jobProgress(ctx) {
+    const { backup } = services();
+    const expected = backup.getJobToken(ctx.params.id);
+    if (!expected) {
+      ctx.status = 404;
+      ctx.body = { error: { status: 404, name: "JobNotFound", message: "Job not found." } };
+      return;
+    }
+    const token = ctx.query.token || ctx.request.headers["x-job-token"];
+    if (!token || token !== expected) {
+      ctx.status = 403;
+      ctx.body = { error: { status: 403, name: "InvalidJobToken", message: "Invalid or missing job token." } };
+      return;
+    }
+    ctx.body = { data: backup.getJob(ctx.params.id) };
   },
 
   async jobList(ctx) {

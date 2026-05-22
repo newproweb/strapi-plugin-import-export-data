@@ -49,8 +49,8 @@ const useElapsed = (job) => {
   }, [job, tick]);
 };
 
-const JobProgressModal = ({ jobId, type = "export", onClose, onDone }) => {
-  const { job, authLost, jobLost } = useJobPolling(jobId, onDone);
+const JobProgressModal = ({ jobId, type = "export", token, onClose, onDone }) => {
+  const { job, authLost, jobLost } = useJobPolling(jobId, onDone, token);
   const elapsedMs = useElapsed(job);
 
   const { title, verb } = JOB_TITLES[type] || JOB_TITLES.export;

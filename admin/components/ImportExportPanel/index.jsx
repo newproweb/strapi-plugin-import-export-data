@@ -106,7 +106,7 @@ const ImportExportPanel = () => {
         + "Make sure Strapi has been restarted so the new routes are registered.",
       );
     }
-    setProgressJob({ jobId: res.jobId, type: "import" });
+    setProgressJob({ jobId: res.jobId, type: "import", token: res.token });
     refreshRunningJobs();
     return false;
   };
@@ -268,6 +268,7 @@ const ImportExportPanel = () => {
         <JobProgressModal
           jobId={progressJob.jobId}
           type={progressJob.type}
+          token={progressJob.token}
           onDone={() => reload()}
           onClose={() => setProgressJob(null)}
         />

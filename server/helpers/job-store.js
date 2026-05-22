@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const { backupDir } = require("../utils/fs");
 const { JOB_TTL_MS } = require("../constants/backup");
@@ -59,6 +60,10 @@ const newJobId = () =>
 const blankJob = (type) => ({
   id: newJobId(),
   type,
+  // Random per-job token — lets the progress route authenticate a poll
+  // without an admin DB session, so the modal survives an import that has
+  // wiped the auth tables.
+  token: crypto.randomBytes(18).toString("hex"),
   status: "running",
   startedAt: Date.now(),
   finishedAt: null,

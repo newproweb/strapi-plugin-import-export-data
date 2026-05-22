@@ -5,7 +5,7 @@ const path = require("path");
 
 const { backupDir, ensureBackupDir, isoSlug, resolveExportedPath } = require("../utils/fs");
 const { runStrapiCli } = require("../helpers/cli");
-const { getJob, listJobs } = require("../helpers/jobs");
+const { getJob, getJobToken, listJobs } = require("../helpers/jobs");
 const { takeAuthSnapshot, replayAuthSnapshot } = require("../helpers/auth-snapshot");
 const { startLiveAuthPatcher } = require("../helpers/live-auth-patcher");
 const { autoRollbackFromSnapshot } = require("../helpers/auto-rollback");
@@ -237,6 +237,7 @@ module.exports = () => ({
   createBackupJob,
   restoreBackupJob,
   getJob,
+  getJobToken,
   listJobs,
   deleteBackup,
   getBackupPath,

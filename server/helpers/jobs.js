@@ -215,10 +215,19 @@ const getJob = (id) => {
   return job ? serializeJob(job) : null;
 };
 
+/**
+ * Returns the raw per-job token (not part of the serialized job), used to
+ * authenticate the DB-independent progress route. Null when the job is gone.
+ */
+const getJobToken = (id) => {
+  const job = getJobStore().get(id);
+  return job ? job.token || null : null;
+};
+
 const listJobs = () => {
   const store = getJobStore();
   store.prune();
   return store.list().map(serializeJob);
 };
 
-module.exports = { makeJob, pushLog, updateJob, finalizeJob, getJob, listJobs };
+module.exports = { makeJob, pushLog, updateJob, finalizeJob, getJob, getJobToken, listJobs };

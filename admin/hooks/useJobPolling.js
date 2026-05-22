@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 
-import { getJobStatus } from "../utils/api";
+import { getJobStatus, getJobProgress } from "../utils/api";
 import { isAuthError, isJobLostError } from "../utils/auth";
 import { POLL_INTERVAL_MS } from "../constants/jobs";
 
 const MAX_ERRORS = 10;
 
-export const useJobPolling = (jobId, onDone) => {
+// When a per-job `token` is available, poll the DB-independent progress route
+// so the modal survives an import wiping the admin auth tables; otherwise fall
+// back to the admin-authenticated status route.
+export const useJobPolling = (jobId, onDone, token) => {
   const [job, setJob] = useState(null);
   const [authLost, setAuthLost] = useState(false);
   const [jobLost, setJobLost] = useState(false);
@@ -24,9 +27,11 @@ export const useJobPolling = (jobId, onDone) => {
     let doneFired = false;
     let errors = 0;
 
+    const fetchJob = () => (token ? getJobProgress(jobId, token) : getJobStatus(jobId));
+
     const pump = async () => {
       try {
-        const next = await getJobStatus(jobId);
+        const next = await fetchJob();
         if (cancelled) return;
         errors = 0;
         setJob(next);
@@ -56,7 +61,7 @@ export const useJobPolling = (jobId, onDone) => {
       cancelled = true;
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [jobId]);
+  }, [jobId, token]);
 
   return { job, authLost, jobLost };
 };

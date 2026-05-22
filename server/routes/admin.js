@@ -42,6 +42,15 @@ module.exports = {
     route("GET", "/backup/jobs", "backupController.jobList", "read"),
     route("GET", "/backup/job/:id", "backupController.jobStatus", "read"),
 
+    // DB-independent progress poll — token-gated (no admin session), so the
+    // progress modal keeps working while an import has wiped the auth tables.
+    {
+      method: "GET",
+      path: "/backup/job/:id/progress",
+      handler: "backupController.jobProgress",
+      config: { auth: false, policies: [] },
+    },
+
     // Destructive actions — require individual permissions
     route("DELETE", "/backup/:file", "backupController.remove", "delete"),
     route("GET", "/backup/:file/download", "backupController.download", "download"),
