@@ -46,19 +46,23 @@ const ConfirmDialog = ({
 }) => {
   if (!confirm) return null;
 
+  const isUploadImport = confirm.type === "upload-import";
   const isRestore = confirm.type === "restore";
-  const title = isRestore ? "Restore backup?" : "Delete backup?";
+  const isImportLike = isRestore || isUploadImport;
+  const title = isUploadImport
+    ? "Import uploaded archive?"
+    : isRestore ? "Restore backup?" : "Delete backup?";
 
   return (
     <Dialog.Root open onOpenChange={onClose}>
       <Dialog.Content>
         <Dialog.Header>{title}</Dialog.Header>
         <Dialog.Body>
-          {isRestore && working && <RestoreRunning />}
-          {isRestore && !working && (
+          {isImportLike && working && <RestoreRunning />}
+          {isImportLike && !working && (
             <RestoreForm file={confirm.file} scope={restoreScope} onScope={onScope} />
           )}
-          {!isRestore && <DeleteBody file={confirm.file} />}
+          {!isImportLike && <DeleteBody file={confirm.file} />}
         </Dialog.Body>
         <Dialog.Footer>
           <Dialog.Cancel>
@@ -66,11 +70,11 @@ const ConfirmDialog = ({
           </Dialog.Cancel>
           <Dialog.Action>
             <Button
-              variant={isRestore ? "default" : "danger-light"}
+              variant={isImportLike ? "default" : "danger-light"}
               loading={working}
               onClick={() => onConfirm(confirm)}
             >
-              {isRestore ? "Restore" : "Delete"}
+              {isUploadImport ? "Import" : isRestore ? "Restore" : "Delete"}
             </Button>
           </Dialog.Action>
         </Dialog.Footer>

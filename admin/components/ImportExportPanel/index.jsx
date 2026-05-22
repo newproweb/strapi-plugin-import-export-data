@@ -187,15 +187,27 @@ const ImportExportPanel = () => {
     }
   };
 
-  const onImport = async () => {
+  // Step 1 — validate the chosen file, then open the scope dialog. The actual
+  // upload + import runs in onImportConfirmed once the user picks a scope.
+  const onImport = () => {
     if (!uploadFile) return warnMissingFile();
     if (uploadFile.name.endsWith(".enc") && !uploadKey.trim()) return warnMissingKey();
-    if (!assertUploadable(uploadFile)) return;
+    if (!assertUploadable(uploadFile)) return undefined;
+    return setConfirm({ type: "upload-import", file: uploadFile.name });
+  };
+
+  const onImportConfirmed = async () => {
     setWorking(true);
+    const scopeOpts = scopeToOptions(restoreScope);
+    const options = { key: uploadKey || undefined, ...scopeOpts };
     try {
-      const res = await importUpload(uploadFile, uploadKey, { notify, reload });
-      const pending = applyRestoreResponse(res, res.stagedFile, { key: uploadKey || undefined });
-      if (!pending) resetUpload();
+      const res = await importUpload(uploadFile, uploadKey, scopeOpts, { notify, reload });
+      const pending = applyRestoreResponse(res, res.stagedFile, options);
+      setConfirm(null);
+      if (!pending) {
+        setRestoreScope("full");
+        resetUpload();
+      }
     } catch (e) {
       notify({ type: "danger", message: readServerError(e) });
     } finally {
@@ -215,8 +227,11 @@ const ImportExportPanel = () => {
     if (file) setUploadFile(file);
   };
 
-  const handleConfirm = (c) =>
-    c.type === "restore" ? onRestore(c.file) : onDelete(c.file);
+  const handleConfirm = (c) => {
+    if (c.type === "upload-import") return onImportConfirmed();
+    if (c.type === "restore") return onRestore(c.file);
+    return onDelete(c.file);
+  };
 
   return (
     <Box>
