@@ -55,6 +55,7 @@ const resolveSnapshotMode = (body, cfg) => {
 const buildRestoreOpts = (body, cfg) => ({
   key: body.key || cfg.encryptionKey || undefined,
   exclude: body.exclude || undefined,
+  only: body.only || undefined,
   preRestoreSnapshot: resolveSnapshotMode(body, cfg),
   confirmSchemaChange: isTruthy(body.confirmSchemaChange),
   deepValidate: isTruthy(body.deepValidate),

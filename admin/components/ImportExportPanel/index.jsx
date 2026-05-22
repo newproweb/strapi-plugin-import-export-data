@@ -27,7 +27,7 @@ const ImportExportPanel = () => {
   const [working, setWorking] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const [restoreExcludeFiles, setRestoreExcludeFiles] = useState(false);
+  const [restoreScope, setRestoreScope] = useState("full");
   const [progressJob, setProgressJob] = useState(null);
   const [downloading, setDownloading] = useState(null);
   const [schemaConfirm, setSchemaConfirm] = useState(null);
@@ -111,14 +111,22 @@ const ImportExportPanel = () => {
     return false;
   };
 
+  // Maps the restore scope to CLI options: "db" excludes the assets group
+  // (fast DB-only restore), "files" imports only the assets group.
+  const scopeToOptions = (scope) => {
+    if (scope === "db") return { exclude: "files" };
+    if (scope === "files") return { only: "files" };
+    return {};
+  };
+
   const onRestore = async (file) => {
     setWorking(true);
-    const options = { exclude: restoreExcludeFiles ? "files" : undefined };
+    const options = scopeToOptions(restoreScope);
     try {
       const res = await restoreAction(file, options);
       const pending = applyRestoreResponse(res, file, options);
       setConfirm(null);
-      if (!pending) setRestoreExcludeFiles(false);
+      if (!pending) setRestoreScope("full");
     } catch (e) {
       notify({ type: "danger", message: readServerError(e) });
     } finally {
@@ -134,7 +142,7 @@ const ImportExportPanel = () => {
       const res = await restoreAction(file, { ...options, confirmSchemaChange: true });
       applyRestoreResponse(res, file, options);
       setSchemaConfirm(null);
-      setRestoreExcludeFiles(false);
+      setRestoreScope("full");
       resetUpload();
     } catch (e) {
       notify({ type: "danger", message: readServerError(e) });
@@ -277,9 +285,9 @@ const ImportExportPanel = () => {
       <ConfirmDialog
         confirm={confirm}
         working={working}
-        restoreExcludeFiles={restoreExcludeFiles}
+        restoreScope={restoreScope}
         onClose={() => setConfirm(null)}
-        onToggleExclude={setRestoreExcludeFiles}
+        onScope={setRestoreScope}
         onConfirm={handleConfirm}
       />
 

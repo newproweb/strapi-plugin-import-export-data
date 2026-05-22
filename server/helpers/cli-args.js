@@ -13,10 +13,11 @@ const buildExportArgs = ({ basePath, encrypt, key, compress, exclude }) => {
   return args;
 };
 
-const buildImportArgs = ({ filePath, key, exclude }) => {
+const buildImportArgs = ({ filePath, key, exclude, only }) => {
   const args = ["import", "--file", filePath, "--force"];
   if (key) args.push("--key", key);
   if (hasValue(exclude)) args.push("--exclude", exclude.trim());
+  if (hasValue(only)) args.push("--only", only.trim());
   return args;
 };
 

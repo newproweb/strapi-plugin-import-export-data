@@ -1,6 +1,6 @@
 import React from "react";
 
-import { Dialog, Box, Flex, Button, Typography, Checkbox, Loader } from "@strapi/design-system";
+import { Dialog, Flex, Button, Typography, SingleSelect, SingleSelectOption, Loader } from "@strapi/design-system";
 
 const DeleteBody = ({ file }) => (
   <Typography>
@@ -17,21 +17,23 @@ const RestoreRunning = () => (
   </Flex>
 );
 
-const RestoreForm = ({ file, excludeFiles, onToggleExclude }) => (
-  <Flex direction="column" gap={3}>
+const SCOPE_HINT = {
+  full: "Imports the database and the uploads/assets folder.",
+  db: "Imports only the database — uploads are left untouched. Fastest path; run a Files-only restore afterwards if you also need the assets.",
+  files: "Imports only the uploads/assets — the database is left untouched.",
+};
+
+const RestoreForm = ({ file, scope, onScope }) => (
+  <Flex direction="column" gap={3} alignItems="stretch">
     <Typography>
-      Runs <code>strapi import --file {file} --force{excludeFiles ? " --exclude files" : ""}</code>.
-      It will <strong>overwrite</strong> the current database
-      {excludeFiles ? " (uploads folder preserved)" : " and uploads"}.
+      Runs <code>strapi import</code> on <code>{file}</code>. It will <strong>overwrite</strong> the selected data.
     </Typography>
-    <Checkbox checked={excludeFiles} onCheckedChange={(v) => onToggleExclude(Boolean(v))}>
-      Exclude files (keep existing uploads folder)
-    </Checkbox>
-    <Typography variant="pi" textColor="neutral600">
-      Tick this if the backup was created with <code>--exclude files</code>
-      {" "}(no <code>assets/</code> inside the archive), or when restoring to an environment whose media must not be touched.
-      Without it, Strapi will wipe <code>public/uploads/</code> and — on cloud storage — may permanently delete the remote assets.
-    </Typography>
+    <SingleSelect label="What to restore" value={scope} onChange={(v) => onScope(String(v))}>
+      <SingleSelectOption value="full">Full — database + files</SingleSelectOption>
+      <SingleSelectOption value="db">Database only (fast)</SingleSelectOption>
+      <SingleSelectOption value="files">Files only</SingleSelectOption>
+    </SingleSelect>
+    <Typography variant="pi" textColor="neutral600">{SCOPE_HINT[scope]}</Typography>
     <Typography variant="pi" textColor="success700">
       Your admin session, API tokens and user accounts are snapshotted before the CLI runs and replayed afterwards, so you stay signed in — no re-login needed.
     </Typography>
@@ -40,7 +42,7 @@ const RestoreForm = ({ file, excludeFiles, onToggleExclude }) => (
 );
 
 const ConfirmDialog = ({
-  confirm, working, restoreExcludeFiles, onClose, onToggleExclude, onConfirm,
+  confirm, working, restoreScope, onClose, onScope, onConfirm,
 }) => {
   if (!confirm) return null;
 
@@ -54,11 +56,7 @@ const ConfirmDialog = ({
         <Dialog.Body>
           {isRestore && working && <RestoreRunning />}
           {isRestore && !working && (
-            <RestoreForm
-              file={confirm.file}
-              excludeFiles={restoreExcludeFiles}
-              onToggleExclude={onToggleExclude}
-            />
+            <RestoreForm file={confirm.file} scope={restoreScope} onScope={onScope} />
           )}
           {!isRestore && <DeleteBody file={confirm.file} />}
         </Dialog.Body>

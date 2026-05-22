@@ -155,7 +155,7 @@ const makePreRestoreSnapshot = async (emit, onLog, { mode = "full" } = {}) => {
 
 const restoreBackup = async (
   fileName,
-  { key, exclude, preserveAuth = true, preRestoreSnapshot = "full", deepValidate = false, shouldAbort } = {},
+  { key, exclude, only, preserveAuth = true, preRestoreSnapshot = "full", deepValidate = false, shouldAbort } = {},
   onLog,
 ) => {
   const filePath = getBackupPath(fileName);
@@ -188,7 +188,7 @@ const restoreBackup = async (
   let result;
   try {
     try {
-      result = await runStrapiCli(buildImportArgs({ filePath, key, exclude }), { onLog, shouldAbort });
+      result = await runStrapiCli(buildImportArgs({ filePath, key, exclude, only }), { onLog, shouldAbort });
     } catch (cliErr) {
       emit(`[safeguard] import CLI failed: ${cliErr.message}`);
       // Stop the patcher before starting the rollback CLI so they don't
