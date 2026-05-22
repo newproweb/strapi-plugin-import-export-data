@@ -16,6 +16,7 @@ import BackupTable from "./BackupTable";
 import FullSeedCard from "./FullSeedCard";
 import ConfirmDialog from "./ConfirmDialog";
 import SchemaConfirmDialog from "./SchemaConfirmDialog";
+import TransferDialog from "./TransferDialog";
 import { deleteAction, restoreAction, downloadAction, stageUpload, importUpload } from "./handlers";
 
 const ImportExportPanel = () => {
@@ -31,6 +32,7 @@ const ImportExportPanel = () => {
   const [progressJob, setProgressJob] = useState(null);
   const [downloading, setDownloading] = useState(null);
   const [schemaConfirm, setSchemaConfirm] = useState(null);
+  const [transferFile, setTransferFile] = useState(null);
 
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadKey, setUploadKey] = useState("");
@@ -272,6 +274,7 @@ const ImportExportPanel = () => {
         downloading={downloading}
         onReload={reload}
         onDownload={onDownload}
+        onTransfer={setTransferFile}
         onRestore={(file) => setConfirm({ type: "restore", file })}
         onDelete={(file) => setConfirm({ type: "delete", file })}
       />
@@ -311,6 +314,12 @@ const ImportExportPanel = () => {
         working={working}
         onClose={() => setSchemaConfirm(null)}
         onConfirm={onSchemaConfirm}
+      />
+
+      <TransferDialog
+        file={transferFile}
+        onClose={() => setTransferFile(null)}
+        notify={notify}
       />
     </Box>
   );

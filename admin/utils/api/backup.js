@@ -88,6 +88,14 @@ export const getBackupLimits = async () => {
   return data?.data ?? { maxFileSize: 0, busy: false };
 };
 
+// Creates a time-limited download link for a backup and emails it to the
+// given addresses and/or the recipients saved in plugin settings.
+export const transferBackup = async (file, body = {}) => {
+  const { post } = getFetchClient();
+  const { data } = await post(`${basePath}/backup/${encoded(file)}/transfer`, body);
+  return data?.data;
+};
+
 export const fullSeedPlan = async (file) => {
   const { get } = getFetchClient();
   const { data } = await get(`${basePath}/full-seed/${encoded(file)}/plan`);

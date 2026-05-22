@@ -3,7 +3,7 @@ import React from "react";
 import {
   Box, Flex, Button, Typography, Table, Thead, Tbody, Tr, Td, Th, Badge, Loader,
 } from "@strapi/design-system";
-import { Download, Trash, File } from "@strapi/icons";
+import { Download, Trash, File, Mail } from "@strapi/icons";
 
 import { formatBytes, formatBytesExact, formatDate, originOf } from "../../utils/format";
 
@@ -15,7 +15,7 @@ const FlagBadges = ({ row }) => (
   </Flex>
 );
 
-const RowActions = ({ file, working, downloading, onDownload, onRestore, onDelete }) => {
+const RowActions = ({ file, working, downloading, onDownload, onTransfer, onRestore, onDelete }) => {
   const isDownloading = downloading?.file === file;
   const downloadLabel = isDownloading
     ? (downloading.percent > 0 ? `${downloading.percent}%` : "Downloading…")
@@ -31,6 +31,9 @@ const RowActions = ({ file, working, downloading, onDownload, onRestore, onDelet
         onClick={() => onDownload(file)}
       >
         {downloadLabel}
+      </Button>
+      <Button size="S" variant="tertiary" startIcon={<Mail />} onClick={() => onTransfer(file)} disabled={working}>
+        Send
       </Button>
       <Button size="S" variant="secondary" onClick={() => onRestore(file)} disabled={working}>
         Restore
@@ -49,7 +52,7 @@ const EmptyState = () => (
   </Flex>
 );
 
-const BackupTable = ({ rows, loading, working, downloading, onReload, onDownload, onRestore, onDelete }) => (
+const BackupTable = ({ rows, loading, working, downloading, onReload, onDownload, onTransfer, onRestore, onDelete }) => (
   <>
     <Flex justifyContent="space-between" alignItems="center" paddingBottom={3}>
       <Typography variant="beta">Backups</Typography>
@@ -94,6 +97,7 @@ const BackupTable = ({ rows, loading, working, downloading, onReload, onDownload
                   working={working}
                   downloading={downloading}
                   onDownload={onDownload}
+                  onTransfer={onTransfer}
                   onRestore={onRestore}
                   onDelete={onDelete}
                 />

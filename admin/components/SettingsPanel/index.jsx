@@ -9,6 +9,7 @@ import { readServerError } from "../../utils/format";
 
 import ScheduleSection from "./ScheduleSection";
 import EncryptionSection from "./EncryptionSection";
+import TransferSection from "./TransferSection";
 import LastRunBox from "./LastRunBox";
 
 const buildPayload = (cfg) => {
@@ -18,6 +19,7 @@ const buildPayload = (cfg) => {
     autoExcludeFiles: cfg.autoExcludeFiles,
     adoptOrphans: Boolean(cfg.adoptOrphans),
     preRestoreSnapshot: cfg.preRestoreSnapshot !== false,
+    transferRecipients: cfg.transferRecipients,
   };
 
   if (typeof cfg.encryptionKey === "string" && !cfg.encryptionKey.startsWith("••")) {
@@ -92,6 +94,7 @@ const SettingsPanel = () => {
     <Box>
       <ScheduleSection cfg={cfg} onField={onField} />
       <EncryptionSection cfg={cfg} onField={onField} />
+      <TransferSection cfg={cfg} onField={onField} />
       <LastRunBox lastBackupAt={cfg.lastBackupAt} />
       <Flex gap={2} justifyContent="flex-end" paddingTop={4} paddingBottom={4}>
         <Button variant="secondary" onClick={onRunNow} loading={running} startIcon={<Play />}>
