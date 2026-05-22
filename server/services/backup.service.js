@@ -147,13 +147,13 @@ const makePreRestoreSnapshot = async (emit, onLog) => {
 
 const restoreBackup = async (
   fileName,
-  { key, exclude, preserveAuth = true, preRestoreSnapshot = true } = {},
+  { key, exclude, preserveAuth = true, preRestoreSnapshot = true, deepValidate = false } = {},
   onLog,
 ) => {
   const filePath = getBackupPath(fileName);
   const emit = makeLogEmitter(onLog);
 
-  const validation = validateArchive(filePath, emit);
+  const validation = validateArchive(filePath, emit, { deep: deepValidate });
   assertSizeWithinLimit(validation.size, fileName);
 
   let preSnapshot = null;

@@ -65,11 +65,45 @@ const assertTarIntegrity = (filePath) => {
   return { entries };
 };
 
-const validateArchive = (filePath, emit) => {
+/**
+ * Fast alternative to `assertTarIntegrity`: reads only the first bytes instead
+ * of decompressing the whole archive. A `.tar.gz` is verified by its gzip
+ * magic (`1f 8b`); plain `.tar` and encrypted archives are trusted on
+ * extension + size, since the import CLI rejects a corrupt archive anyway.
+ */
+const sniffArchiveHeader = (filePath) => {
+  if (isEncrypted(filePath)) return { mode: "light", skipped: "encrypted" };
+  if (!isGzipped(filePath)) return { mode: "light", skipped: "plain-tar" };
+
+  const head = Buffer.alloc(2);
+  let fd;
+  try {
+    fd = fs.openSync(filePath, "r");
+    fs.readSync(fd, head, 0, 2, 0);
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+  if (head[0] !== 0x1f || head[1] !== 0x8b) {
+    throw new Error(
+      "archive failed header check: gzip magic bytes missing — the .tar.gz is truncated or not an archive.",
+    );
+  }
+  return { mode: "light" };
+};
+
+/**
+ * @param {{ deep?: boolean }} [options]  `deep` runs the full `tar` integrity
+ *   walk (decompresses the whole archive); the default light mode only sniffs
+ *   the header, which is what a restore uses so a large archive isn't read
+ *   twice (once to validate, once to import).
+ */
+const validateArchive = (filePath, emit, { deep = false } = {}) => {
   assertFileExists(filePath);
   assertExtensionSafe(filePath);
   const size = assertMinSize(filePath);
-  const integrity = assertTarIntegrity(filePath);
+  const integrity = deep ? assertTarIntegrity(filePath) : sniffArchiveHeader(filePath);
 
   if (!emit) return { size, ...integrity };
 
@@ -77,6 +111,8 @@ const validateArchive = (filePath, emit) => {
     emit(`[validate] archive OK (encrypted — integrity check skipped, size=${size} B)`);
   } else if (integrity.skipped === "tar-not-available") {
     emit(`[validate] archive OK (size=${size} B — tar binary unavailable, integrity not verified)`);
+  } else if (integrity.mode === "light") {
+    emit(`[validate] archive OK (size=${size} B — fast header check; deep integrity walk skipped for speed)`);
   } else {
     emit(`[validate] archive OK (size=${size} B, ${integrity.entries} entries)`);
   }

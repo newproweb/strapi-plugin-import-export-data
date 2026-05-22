@@ -45,6 +45,7 @@ const buildRestoreOpts = (body, cfg) => ({
   exclude: body.exclude || undefined,
   preRestoreSnapshot: body.preRestoreSnapshot === undefined ? cfg.preRestoreSnapshot !== false : isTruthy(body.preRestoreSnapshot),
   confirmSchemaChange: isTruthy(body.confirmSchemaChange),
+  deepValidate: isTruthy(body.deepValidate),
 });
 
 module.exports = {
