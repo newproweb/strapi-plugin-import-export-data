@@ -26,7 +26,7 @@ const RunningJobsBanner = ({ jobs, onSelect }) => {
               key={j.id}
               size="S"
               variant="tertiary"
-              onClick={() => onSelect({ jobId: j.id, type: j.type })}
+              onClick={() => onSelect({ jobId: j.id, type: j.type, token: j.token })}
             >
               {j.type} · {j.progress?.percent ? `${j.progress.percent}%` : "…"} · {formatElapsed(j.elapsedMs)}
               {j.transferComplete ? " ✓ transfer done" : ""}

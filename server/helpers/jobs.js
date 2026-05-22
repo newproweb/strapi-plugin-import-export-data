@@ -195,6 +195,7 @@ const finalizeJob = (jobId) => {
 const serializeJob = (job) => ({
   id: job.id,
   type: job.type,
+  token: job.token,
   status: job.status,
   startedAt: new Date(job.startedAt).toISOString(),
   finishedAt: job.finishedAt ? new Date(job.finishedAt).toISOString() : null,
