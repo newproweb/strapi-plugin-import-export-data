@@ -16,9 +16,15 @@ const TransferDialog = ({ file, onClose, notify }) => {
     setSending(true);
     try {
       const res = await transferBackup(file, { emails, useSettingsRecipients: useSettings });
-      const sent = (res?.results || []).filter((r) => r.sent).length;
-      notify({ type: "success", message: `Download link emailed to ${sent} recipient(s).` });
-      onClose();
+      const results = (res && res.results) || [];
+      const sent = results.filter((r) => r.sent).length;
+      if (sent > 0 && sent === results.length) {
+        notify({ type: "success", message: `Download link emailed to ${sent} recipient(s).` });
+        onClose();
+      } else {
+        const firstError = (results.find((r) => !r.sent) || {}).error || "unknown error";
+        notify({ type: "danger", message: `Emailed ${sent} of ${results.length}. Email failed: ${firstError}` });
+      }
     } catch (e) {
       notify({ type: "danger", message: readServerError(e) });
     } finally {

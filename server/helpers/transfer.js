@@ -97,6 +97,7 @@ const sendTransferEmails = async (recipients, payload) => {
       await emailService.send({ to, subject, html });
       results.push({ to, sent: true });
     } catch (err) {
+      strapi.log.warn(`[import-export] [transfer] email to ${to} failed: ${err.message}`);
       results.push({ to, sent: false, error: err.message });
     }
   }
