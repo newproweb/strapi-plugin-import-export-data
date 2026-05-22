@@ -52,6 +52,9 @@ const mergePatch = (current, patch) => ({
   autoExcludeFiles: pickBool(patch, "autoExcludeFiles", current),
   adoptOrphans: pickBool(patch, "adoptOrphans", current),
   preRestoreSnapshot: pickBool(patch, "preRestoreSnapshot", current),
+  transferRecipients: Array.isArray(patch.transferRecipients)
+    ? patch.transferRecipients
+    : (Array.isArray(current.transferRecipients) ? current.transferRecipients : []),
   lastBackupAt: patch.lastBackupAt === undefined ? current.lastBackupAt : patch.lastBackupAt,
 });
 

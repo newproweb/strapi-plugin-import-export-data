@@ -8,5 +8,6 @@ module.exports = {
     autoExcludeFiles: false,
     adoptOrphans: false,
     preRestoreSnapshot: true,
+    transferRecipients: [],
   },
 };
