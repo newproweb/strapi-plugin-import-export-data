@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-import { Modal, Box, Flex, Button, Typography } from "@strapi/design-system";
+import { Modal, Dialog, Box, Flex, Button, Typography } from "@strapi/design-system";
 
 import { useJobPolling } from "../../hooks/useJobPolling";
+import { abortJob } from "../../utils/api";
 import { JOB_TITLES } from "../../constants/jobs";
 import { formatElapsed } from "../../utils/format";
 
@@ -53,6 +54,18 @@ const JobProgressModal = ({ jobId, type = "export", token, onClose, onDone }) =>
   const { job, authLost, jobLost } = useJobPolling(jobId, onDone, token);
   const elapsedMs = useElapsed(job);
 
+  const [abortConfirm, setAbortConfirm] = useState(false);
+  const [aborting, setAborting] = useState(false);
+
+  const confirmAbort = async () => {
+    setAborting(true);
+    try {
+      await abortJob(jobId, token);
+    } catch {
+      /* the poll surfaces the final job state */
+    }
+  };
+
   const { title, verb } = JOB_TITLES[type] || JOB_TITLES.export;
 
   const isRunning = !job || job.status === "running";
@@ -68,6 +81,7 @@ const JobProgressModal = ({ jobId, type = "export", token, onClose, onDone }) =>
   const percentLabel = hasPercent ? `${percent}%` : isRunning ? "—" : isSuccess ? "100%" : "";
 
   return (
+    <>
     <Modal.Root open onOpenChange={(v) => { if (!v) onClose?.(); }}>
       <Modal.Content style={{ maxWidth: 720 }}>
         <Modal.Header>
@@ -123,12 +137,44 @@ const JobProgressModal = ({ jobId, type = "export", token, onClose, onDone }) =>
           </Flex>
         </Modal.Body>
         <Modal.Footer>
+          {isRunning && token && (
+            <Button
+              variant="danger-light"
+              onClick={() => setAbortConfirm(true)}
+              disabled={aborting}
+            >
+              {aborting ? "Aborting…" : "Abort job"}
+            </Button>
+          )}
           <Button variant="tertiary" onClick={onClose}>
             {closeLabel({ isRunning, transferComplete })}
           </Button>
         </Modal.Footer>
       </Modal.Content>
     </Modal.Root>
+
+    <Dialog.Root open={abortConfirm} onOpenChange={(v) => { if (!v) setAbortConfirm(false); }}>
+      <Dialog.Content>
+        <Dialog.Header>Abort this job?</Dialog.Header>
+        <Dialog.Body>
+          <Typography>
+            The running <code>strapi {type}</code> process will be terminated.
+            {type === "import"
+              ? " The restore then auto-rolls back to the pre-restore snapshot, returning the database to its previous state."
+              : " The partially-written archive is discarded."}
+          </Typography>
+        </Dialog.Body>
+        <Dialog.Footer>
+          <Dialog.Cancel>
+            <Button variant="tertiary">Keep running</Button>
+          </Dialog.Cancel>
+          <Dialog.Action>
+            <Button variant="danger" onClick={confirmAbort}>Abort job</Button>
+          </Dialog.Action>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
+    </>
   );
 };
 

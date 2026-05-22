@@ -51,6 +51,7 @@ const streamChunk = (buf, stream, onLog, sink, state) => {
 };
 
 const HEARTBEAT_MS = 30 * 1000;
+const ABORT_POLL_MS = 2 * 1000;
 
 const emitHeartbeat = (child, state, onLog) => {
   if (!child || child.killed || child.exitCode !== null) return;
@@ -61,7 +62,7 @@ const emitHeartbeat = (child, state, onLog) => {
   emitLine("stdout", msg, onLog);
 };
 
-const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog } = {}) =>
+const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog, shouldAbort } = {}) =>
   new Promise((resolve, reject) => {
     const { cmd, baseArgs } = resolveStrapiBin();
     const fullArgs = [...baseArgs, ...args];
@@ -112,6 +113,8 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog } = {}) =>
     };
     const state = { last: "", lastAt: Date.now(), startedAt: Date.now() };
 
+    let aborted = false;
+
     const timer = setTimeout(() => {
       try { child.kill("SIGKILL"); } catch { /* noop */ }
       reject(new Error(`strapi ${args[0]} timed out after ${Math.round(timeoutMs / 1000)}s`));
@@ -119,18 +122,39 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog } = {}) =>
 
     const heartbeat = setInterval(() => emitHeartbeat(child, state, onLog), HEARTBEAT_MS);
 
+    // Abort poll — the running job exposes `shouldAbort()`; when it flips true
+    // the CLI child is killed and the run rejects with a clear abort error.
+    const abortPoll = shouldAbort
+      ? setInterval(() => {
+          let stop = false;
+          try { stop = Boolean(shouldAbort()); } catch { stop = false; }
+          if (!stop) return;
+          aborted = true;
+          emitLine("stdout", "[abort] abort requested — terminating the strapi CLI…", onLog);
+          try { child.kill("SIGKILL"); } catch { /* noop */ }
+        }, ABORT_POLL_MS)
+      : null;
+
+    const clearTimers = () => {
+      clearTimeout(timer);
+      clearInterval(heartbeat);
+      if (abortPoll) clearInterval(abortPoll);
+    };
+
     child.stdout.on("data", (buf) => streamChunk(buf, "stdout", onLog, sink, state));
     child.stderr.on("data", (buf) => streamChunk(buf, "stderr", onLog, sink, state));
 
     child.on("error", (err) => {
-      clearTimeout(timer);
-      clearInterval(heartbeat);
+      clearTimers();
       reject(err);
     });
 
     child.on("exit", (code) => {
-      clearTimeout(timer);
-      clearInterval(heartbeat);
+      clearTimers();
+      if (aborted) {
+        reject(new Error("Job aborted by user."));
+        return;
+      }
       if (code === 0) {
         resolve({ code, stdout: sink.stdout, stderr: sink.stderr });
         return;

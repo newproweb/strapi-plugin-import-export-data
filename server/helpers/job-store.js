@@ -40,6 +40,11 @@ const lockPath = () => path.join(jobsRoot(), ".lock");
 
 const jobPath = (id) => path.join(jobsRoot(), `${id}.json`);
 
+// One-way abort signal — a marker file the abort endpoint creates and the
+// running job's CLI poll checks. A plain file (not a JSON field) so any
+// replica sees it immediately, with no in-memory job cache to go stale.
+const abortPath = (id) => path.join(jobsRoot(), `${id}.abort`);
+
 const writeAtomic = (file, data) => {
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(tmp, data);
@@ -174,6 +179,7 @@ class FileJobStore {
       this.flushTimers.delete(id);
     }
     try { fs.unlinkSync(jobPath(id)); } catch { /* ignore */ }
+    try { fs.unlinkSync(abortPath(id)); } catch { /* ignore */ }
   }
 
   prune() {
@@ -334,6 +340,25 @@ const getJobMutex = () => {
 const setJobStore = (instance) => { _store = instance; };
 const setJobMutex = (instance) => { _mutex = instance; };
 
+/** Raises the abort signal for a job. Picked up by the running CLI poll. */
+const requestJobAbort = (id) => {
+  try {
+    fs.writeFileSync(abortPath(id), String(Date.now()));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isAbortRequested = (id) => {
+  try { return fs.existsSync(abortPath(id)); }
+  catch { return false; }
+};
+
+const clearJobAbort = (id) => {
+  try { fs.unlinkSync(abortPath(id)); } catch { /* ignore */ }
+};
+
 module.exports = {
   FileJobStore,
   FileJobMutex,
@@ -341,4 +366,7 @@ module.exports = {
   getJobMutex,
   setJobStore,
   setJobMutex,
+  requestJobAbort,
+  isAbortRequested,
+  clearJobAbort,
 };

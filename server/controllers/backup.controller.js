@@ -151,6 +151,33 @@ module.exports = ({ strapi }) => ({
     ctx.body = { data: backup.getJob(ctx.params.id) };
   },
 
+  // Token-gated abort — raises the abort signal for a running job. The job's
+  // CLI poll picks it up, kills the child, and a restore then auto-rolls back
+  // to the pre-restore snapshot. Token-gated like jobProgress so it works even
+  // while an import has wiped the auth tables.
+  async jobAbort(ctx) {
+    const { backup } = services();
+    const expected = backup.getJobToken(ctx.params.id);
+    if (!expected) {
+      ctx.status = 404;
+      ctx.body = { error: { status: 404, name: "JobNotFound", message: "Job not found." } };
+      return;
+    }
+    const token = ctx.query.token || (ctx.request.body && ctx.request.body.token) || ctx.request.headers["x-job-token"];
+    if (!token || token !== expected) {
+      ctx.status = 403;
+      ctx.body = { error: { status: 403, name: "InvalidJobToken", message: "Invalid or missing job token." } };
+      return;
+    }
+    const job = backup.getJob(ctx.params.id);
+    if (!job || job.status !== "running") {
+      ctx.body = { data: { aborted: false, status: job ? job.status : "missing", message: "Job is not running." } };
+      return;
+    }
+    backup.requestJobAbort(ctx.params.id);
+    ctx.body = { data: { aborted: true, message: "Abort requested — the job will stop shortly." } };
+  },
+
   async jobList(ctx) {
     ctx.body = { data: services().backup.listJobs() };
   },

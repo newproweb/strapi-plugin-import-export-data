@@ -18,6 +18,7 @@ const { sanitizePrefix, buildExportArgs, buildImportArgs } = require("../helpers
 const { makeLogEmitter } = require("../helpers/emitter");
 const { describeArchive } = require("../helpers/archive-describe");
 const { runInBackground } = require("../helpers/background-job");
+const { requestJobAbort } = require("../helpers/job-store");
 const { validateArchive } = require("../helpers/archive-validate");
 const { assertSizeWithinLimit } = require("../helpers/body-limit");
 const { startAssetProgressMonitor } = require("../helpers/asset-progress-monitor");
@@ -29,7 +30,7 @@ const assertArchiveExists = (archivePath, basePath) => {
   }
 };
 
-const createBackup = async ({ encrypt = false, key, compress = true, exclude, prefix = "backup", adoptOrphans = false } = {}, onLog) => {
+const createBackup = async ({ encrypt = false, key, compress = true, exclude, prefix = "backup", adoptOrphans = false, shouldAbort } = {}, onLog) => {
   const dir = ensureBackupDir();
   const id = `${sanitizePrefix(prefix)}-${isoSlug()}`;
   const basePath = path.join(dir, id);
@@ -49,7 +50,7 @@ const createBackup = async ({ encrypt = false, key, compress = true, exclude, pr
 
   let result;
   try {
-    result = await runStrapiCli(buildExportArgs({ basePath, encrypt, key, compress, exclude }), { onLog });
+    result = await runStrapiCli(buildExportArgs({ basePath, encrypt, key, compress, exclude }), { onLog, shouldAbort });
   } finally {
     cleanupPaddedFiles(padded, emit);
   }
@@ -154,7 +155,7 @@ const makePreRestoreSnapshot = async (emit, onLog, { mode = "full" } = {}) => {
 
 const restoreBackup = async (
   fileName,
-  { key, exclude, preserveAuth = true, preRestoreSnapshot = "full", deepValidate = false } = {},
+  { key, exclude, preserveAuth = true, preRestoreSnapshot = "full", deepValidate = false, shouldAbort } = {},
   onLog,
 ) => {
   const filePath = getBackupPath(fileName);
@@ -187,7 +188,7 @@ const restoreBackup = async (
   let result;
   try {
     try {
-      result = await runStrapiCli(buildImportArgs({ filePath, key, exclude }), { onLog });
+      result = await runStrapiCli(buildImportArgs({ filePath, key, exclude }), { onLog, shouldAbort });
     } catch (cliErr) {
       emit(`[safeguard] import CLI failed: ${cliErr.message}`);
       // Stop the patcher before starting the rollback CLI so they don't
@@ -221,12 +222,12 @@ const restoreBackup = async (
 
 const createBackupJob = (options = {}) => {
   assertDevConfig();
-  return runInBackground(JOB_TYPES.EXPORT, (onLog) => createBackup(options, onLog));
+  return runInBackground(JOB_TYPES.EXPORT, (onLog, shouldAbort) => createBackup({ ...options, shouldAbort }, onLog));
 };
 
 const restoreBackupJob = (fileName, options = {}) => {
   assertDevConfig();
-  return runInBackground(JOB_TYPES.IMPORT, (onLog) => restoreBackup(fileName, options, onLog));
+  return runInBackground(JOB_TYPES.IMPORT, (onLog, shouldAbort) => restoreBackup(fileName, { ...options, shouldAbort }, onLog));
 };
 
 module.exports = () => ({
@@ -238,6 +239,7 @@ module.exports = () => ({
   restoreBackupJob,
   getJob,
   getJobToken,
+  requestJobAbort,
   listJobs,
   deleteBackup,
   getBackupPath,

@@ -1,7 +1,7 @@
 "use strict";
 
 const { makeJob, pushLog, updateJob, finalizeJob } = require("./jobs");
-const { getJobStore } = require("./job-store");
+const { getJobStore, isAbortRequested, clearJobAbort } = require("./job-store");
 const { acquire, release, isBusy, currentLabel, current } = require("./job-mutex");
 const { arm, disarm } = require("./crash-guard");
 
@@ -26,7 +26,7 @@ const runInBackground = (type, operation) => {
   arm();
   (async () => {
     try {
-      const result = await operation((evt) => pushLog(job.id, evt));
+      const result = await operation((evt) => pushLog(job.id, evt), () => isAbortRequested(job.id));
       updateJob(job.id, {
         result,
         status: "success",
@@ -40,6 +40,7 @@ const runInBackground = (type, operation) => {
       updateJob(job.id, { finishedAt: Date.now() });
       finalizeJob(job.id);
       release(job.id);
+      clearJobAbort(job.id);
       disarm();
     }
   })();

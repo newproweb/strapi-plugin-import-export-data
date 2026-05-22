@@ -23,3 +23,14 @@ export const listJobs = async () => {
   const { data } = await get(`${basePath}/backup/jobs`);
   return data?.data ?? [];
 };
+
+// Token-gated abort — raises the abort signal for a running job without
+// needing an admin session, so it works while an import has wiped auth.
+export const abortJob = async (jobId, token) => {
+  const { post } = getFetchClient();
+  const { data } = await post(
+    `${basePath}/backup/job/${encodeURIComponent(jobId)}/abort`,
+    { token },
+  );
+  return data?.data;
+};

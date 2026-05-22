@@ -51,6 +51,15 @@ module.exports = {
       config: { auth: false, policies: [] },
     },
 
+    // Abort a running job — token-gated like the progress route so the
+    // operator can stop a job even while an import has wiped the auth tables.
+    {
+      method: "POST",
+      path: "/backup/job/:id/abort",
+      handler: "backupController.jobAbort",
+      config: { auth: false, policies: [] },
+    },
+
     // Destructive actions — require individual permissions
     route("DELETE", "/backup/:file", "backupController.remove", "delete"),
     route("GET", "/backup/:file/download", "backupController.download", "download"),
