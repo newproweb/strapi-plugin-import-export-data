@@ -16,11 +16,17 @@ const RETRY_AFTER_SECONDS = 30;
  * Exempt, so they keep working through a restore:
  *   - HEAD requests — container / load-balancer health checks must keep passing.
  *   - the plugin's own routes — the operator polls job progress and can abort.
+ *   - any request that is not a JSON API call — document navigations and
+ *     static assets (HTML/JS/CSS/fonts) must always be served, or the admin
+ *     SPA cannot boot at all (a blank white page instead of a usable
+ *     "service paused" state). Only the admin's data calls send
+ *     `Accept: application/json`; the browser loading the app does not.
  */
 const maintenanceMiddleware = async (ctx, next) => {
   if (ctx.method === "HEAD") return next();
   if (currentLabel() !== JOB_TYPES.IMPORT) return next();
   if (String(ctx.path || "").includes(PLUGIN)) return next();
+  if (!String(ctx.get("accept")).includes("application/json")) return next();
 
   ctx.status = 503;
   ctx.set("Retry-After", String(RETRY_AFTER_SECONDS));
