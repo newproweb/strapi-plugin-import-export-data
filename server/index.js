@@ -7,7 +7,6 @@ const controllers = require("./controllers");
 const { recoverPending } = require("./helpers/pad-tracker");
 const { getJobStore } = require("./helpers/job-store");
 const { knex, dialect, isSqlite } = require("./helpers/dialect");
-const { installMaintenanceGuard } = require("./helpers/maintenance-guard");
 const { PLUGIN_ACTIONS, PLUGIN } = require("./constants/permissions");
 
 const registerPermissions = async ({ strapi }) => {
@@ -28,7 +27,6 @@ module.exports = {
 
   async register({ strapi }) {
     await registerPermissions({ strapi });
-    installMaintenanceGuard(strapi);
   },
 
   async bootstrap({ strapi }) {
