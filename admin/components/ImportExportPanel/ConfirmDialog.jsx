@@ -31,7 +31,7 @@ const RestoreForm = ({ file, scope, onScope }) => (
     <SingleSelect label="What to restore" value={scope} onChange={(v) => onScope(String(v))}>
       <SingleSelectOption value="full">Full — database + files</SingleSelectOption>
       <SingleSelectOption value="db">Database only (fast)</SingleSelectOption>
-      <SingleSelectOption value="files">Files only</SingleSelectOption>
+      {/* <SingleSelectOption value="files">Files only</SingleSelectOption> */}
     </SingleSelect>
     <Typography variant="pi" textColor="neutral600">{SCOPE_HINT[scope]}</Typography>
     <Typography variant="pi" textColor="success700">

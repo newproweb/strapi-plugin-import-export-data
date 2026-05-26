@@ -4,8 +4,8 @@ import { Flex, Field, TextInput, Typography } from "@strapi/design-system";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-const CHIP_STYLE = { background: "#eef1ff", borderRadius: 4, padding: "2px 4px 2px 8px" };
-const CLOSE_STYLE = { cursor: "pointer", color: "#4945ff", fontWeight: 700, padding: "0 4px", lineHeight: 1 };
+const CHIP_STYLE = { background: "#4945ff", borderRadius: 4, padding: "2px 4px 2px 8px" };
+const CLOSE_STYLE = { cursor: "pointer", color: "#ffffff", fontWeight: 700, padding: "0 4px", lineHeight: 1 };
 
 /**
  * Free-form multi-email input: typed addresses become removable chips on Enter
@@ -51,7 +51,7 @@ const EmailChipsInput = ({ label, hint, value, onChange }) => {
         <Flex gap={1} wrap="wrap" marginBottom={2}>
           {emails.map((email) => (
             <Flex key={email} alignItems="center" style={CHIP_STYLE}>
-              <Typography variant="pi" textColor="primary700">{email}</Typography>
+              <Typography variant="pi" style={{ color: "#ffffff" }}>{email}</Typography>
               <span
                 role="button"
                 tabIndex={0}
