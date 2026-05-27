@@ -8,10 +8,9 @@
 const stringify = (rows) => {
   if (rows === null || rows === undefined) return "[]";
   if (!Array.isArray(rows)) {
-    // Single object → wrap into a one-element array so the output is still
-    // valid JSON and round-trips cleanly through parse().
     return JSON.stringify([rows], null, 2);
   }
+
   return JSON.stringify(rows, null, 2);
 };
 

@@ -11,11 +11,6 @@ const { getJobStore } = require("./job-store");
 const stagePercent = (stagesDone) =>
   Math.round((stagesDone.length / KNOWN_STAGES.length) * 100);
 
-// Strapi v5 import does NOT always emit a `✔ <stage>:` line for each stage —
-// it often jumps straight to the next stage's `- <next>:` start marker. Without
-// retrofitting the prior stages as done, the % bar gets stuck at the first
-// stage's band (e.g. 20% during the entire `assets` stage). Whenever we observe
-// activity in stage N, mark stages 0..N-1 as done.
 const markPriorStagesDone = (job, currentStageName) => {
   const idx = KNOWN_STAGES.indexOf(currentStageName);
   if (idx <= 0) return;

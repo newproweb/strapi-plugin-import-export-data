@@ -36,6 +36,7 @@ const ImportExportPanel = () => {
 
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadKey, setUploadKey] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const [limits, setLimits] = useState({ maxFileSize: 0, busy: false, maxFileSizeLabel: "" });
 
@@ -203,7 +204,12 @@ const ImportExportPanel = () => {
     const scopeOpts = scopeToOptions(restoreScope);
     const options = { key: uploadKey || undefined, ...scopeOpts };
     try {
-      const res = await importUpload(uploadFile, uploadKey, scopeOpts, { notify, reload });
+      const res = await importUpload(uploadFile, uploadKey, scopeOpts, {
+        notify,
+        reload,
+        onUploadProgress: (loaded, total) => setUploadProgress({ loaded, total }),
+      });
+      setUploadProgress(null);
       const pending = applyRestoreResponse(res, res.stagedFile, options);
       setConfirm(null);
       if (!pending) {
@@ -214,6 +220,7 @@ const ImportExportPanel = () => {
       notify({ type: "danger", message: readServerError(e) });
     } finally {
       setWorking(false);
+      setUploadProgress(null);
     }
   };
 
@@ -247,6 +254,7 @@ const ImportExportPanel = () => {
           dragOver={dragOver}
           working={working}
           limits={limits}
+          uploadProgress={uploadProgress}
           onFile={setUploadFile}
           onKey={setUploadKey}
           onDragOver={onDragOver}

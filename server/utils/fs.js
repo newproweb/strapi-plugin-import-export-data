@@ -3,9 +3,6 @@
 const fs = require("fs");
 const path = require("path");
 
-// Reached by timer callbacks (asset-progress-monitor, job-store prune) which
-// can fire while `strapi develop` is mid-reload — a bare `strapi` reference
-// would throw ReferenceError and crash the process. Guard the global access.
 const appRoot = () => {
   try {
     if (typeof strapi !== "undefined" && strapi?.dirs?.app?.root) return strapi.dirs.app.root;

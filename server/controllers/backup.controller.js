@@ -87,8 +87,7 @@ module.exports = ({ strapi }) => ({
     ctx.body = fileStream;
   },
 
-  // Public, token-gated download — the target of a shared transfer link. No
-  // admin session: the token (and its expiry) is the only credential.
+
   async transferDownload(ctx) {
     const resolved = resolveTransfer(ctx.params.token);
     if (!resolved) {
@@ -123,8 +122,8 @@ module.exports = ({ strapi }) => ({
     ctx.body = fileStream;
   },
 
-  // Creates a time-limited download link for a backup and emails it to the
-  // given addresses and/or the recipients saved in plugin settings.
+
+
   async transfer(ctx) {
     try {
       const body = ctx.request.body || {};
@@ -149,9 +148,6 @@ module.exports = ({ strapi }) => ({
       const cfg = await store.read();
       const opts = buildRestoreOpts(ctx.request.body || {}, cfg);
 
-      // Pre-flight: a cross-project archive whose schema differs from this
-      // instance silently drops data for the missing types. Surface the diff
-      // and let the user decide before the destructive import is spawned.
       if (!opts.confirmSchemaChange) {
         const diff = await diffArchiveSchema(backup.getBackupPath(ctx.params.file), strapi);
         if (diff.hasDifferences) {
@@ -188,9 +184,6 @@ module.exports = ({ strapi }) => ({
     ctx.body = { data: job };
   },
 
-  // DB-independent progress poll — authenticated by the per-job token instead
-  // of an admin session, so the modal keeps polling while an import has wiped
-  // the auth tables. Reads job state from the file store, never the DB.
   async jobProgress(ctx) {
     const { backup } = services();
     const expected = backup.getJobToken(ctx.params.id);
@@ -208,10 +201,7 @@ module.exports = ({ strapi }) => ({
     ctx.body = { data: backup.getJob(ctx.params.id) };
   },
 
-  // Token-gated abort — raises the abort signal for a running job. The job's
-  // CLI poll picks it up, kills the child, and a restore then auto-rolls back
-  // to the pre-restore snapshot. Token-gated like jobProgress so it works even
-  // while an import has wiped the auth tables.
+
   async jobAbort(ctx) {
     const { backup } = services();
     const expected = backup.getJobToken(ctx.params.id);

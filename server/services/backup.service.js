@@ -99,58 +99,42 @@ const detectFullSnapshotWillFail = async () => {
 
 const runDbOnlySnapshot = async (bridge) => createBackup({ encrypt: false, compress: true, exclude: "files", prefix: "pre-restore-dbonly", adoptOrphans: false }, bridge);
 
-const makePreRestoreSnapshot = async (emit, onLog, { mode = "full" } = {}) => {
-  emit(`[safeguard] creating pre-restore snapshot before import…`);
-  const bridge = (evt) => {
-    if (!onLog) return;
-    if (typeof evt === "string") {
-      onLog({ stream: "stdout", line: `[pre-restore] ${evt}` });
-      return;
-    }
+const makeBridge = (onLog) => (evt) => {
+  if (!onLog) return;
+  const line = typeof evt === "string" ? evt : (evt?.line || "");
+  if (!line) return;
+  onLog({ stream: (typeof evt === "object" && evt?.stream) || "stdout", line: `[pre-restore] ${line}` });
+};
 
-    const line = evt?.line || "";
-    if (!line) return;
-    onLog({ stream: evt.stream || "stdout", line: `[pre-restore] ${line}` });
-  };
+const makePreRestoreSnapshot = async (emit, onLog, { mode = "full" } = {}) => {
+  const bridge = makeBridge(onLog);
+  emit("[safeguard] creating pre-restore snapshot before import…");
 
   if (mode === "db-only") {
-    emit(`[safeguard] DB-only snapshot mode — assets are NOT backed up (faster restore; rollback covers data only)`);
-    const dbOnly = await runDbOnlySnapshot(bridge);
-    emit(`[safeguard] DB-only snapshot created: ${dbOnly.file}`);
-    return dbOnly;
+    emit("[safeguard] DB-only snapshot — assets skipped, rollback covers data only");
+    const snap = await runDbOnlySnapshot(bridge);
+    emit(`[safeguard] DB-only snapshot created: ${snap.file}`);
+    return snap;
   }
 
   const precheck = await detectFullSnapshotWillFail();
   if (precheck.willFail) {
-    emit(
-      `[safeguard] skipping full snapshot attempt — ${precheck.missing} file(s) referenced by DB are missing on disk `
-      + `(disk=${precheck.disk}, db=${precheck.db}). A full export would crash on the first missing asset.`,
-    );
-
-    emit(`[safeguard] running DB-only snapshot (exclude=files) — assets will NOT be backed up`);
-
-    const dbOnly = await runDbOnlySnapshot(bridge);
-    emit(`[safeguard] DB-only snapshot created: ${dbOnly.file}`);
-    return dbOnly;
+    emit(`[safeguard] ${precheck.missing} file(s) missing on disk — switching to DB-only snapshot`);
+    const snap = await runDbOnlySnapshot(bridge);
+    emit(`[safeguard] DB-only snapshot created: ${snap.file}`);
+    return snap;
   }
 
   try {
-    const snapshotMeta = await createBackup({ encrypt: false, compress: true, exclude: undefined, prefix: "pre-restore", adoptOrphans: false }, bridge);
-    emit(`[safeguard] pre-restore snapshot created: ${snapshotMeta.file}`);
-
-    return snapshotMeta;
+    const snap = await createBackup({ encrypt: false, compress: true, prefix: "pre-restore", adoptOrphans: false }, bridge);
+    emit(`[safeguard] full snapshot created: ${snap.file}`);
+    return snap;
   } catch (err) {
-    emit(`[safeguard] full snapshot failed (${err.message})`);
+    emit(`[safeguard] full snapshot failed (${err.message}) — retrying as DB-only`);
     cleanupPartialSnapshots("pre-restore", emit);
-    emit(`[safeguard] retrying DB-only snapshot (exclude=files) — assets will NOT be backed up`);
-
-    const dbOnly = await runDbOnlySnapshot(bridge);
-    emit(
-      `[safeguard] DB-only snapshot created: ${dbOnly.file}. `
-      + `If the upcoming import overwrites your uploads/ dir you will lose the current files; `
-      + `fix the missing/orphaned files and re-run to capture a full snapshot next time.`,
-    );
-    return dbOnly;
+    const snap = await runDbOnlySnapshot(bridge);
+    emit(`[safeguard] DB-only snapshot created: ${snap.file}`);
+    return snap;
   }
 };
 
@@ -158,6 +142,7 @@ const restoreBackup = async (
   fileName,
   { key, exclude, only, preserveAuth = true, preRestoreSnapshot = "full", deepValidate = false, shouldAbort } = {},
   onLog,
+  setStage,
 ) => {
   const filePath = getBackupPath(fileName);
   const emit = makeLogEmitter(onLog);
@@ -167,53 +152,46 @@ const restoreBackup = async (
 
   let preSnapshot = null;
   if (preRestoreSnapshot !== "off") {
-    try {
-      preSnapshot = await makePreRestoreSnapshot(emit, onLog, { mode: preRestoreSnapshot });
-    } catch (err) {
+    setStage?.("Creating pre-restore snapshot…", 5);
+    preSnapshot = await makePreRestoreSnapshot(emit, onLog, { mode: preRestoreSnapshot }).catch((err) => {
       throw new Error(
         `pre-restore snapshot failed (${err.message}) — aborting import to protect current DB. `
         + "Disable 'preRestoreSnapshot' in Settings if you accept the risk.",
       );
-    }
+    });
   } else {
-    emit(`[safeguard] pre-restore snapshot SKIPPED (setting disabled) — current DB will be overwritten`);
+    emit("[safeguard] pre-restore snapshot SKIPPED (setting disabled) — current DB will be overwritten");
   }
 
-  if (preSnapshot && preSnapshot.file) {
-    await autoSendPreRestore(preSnapshot.file, emit);
-  }
+  if (preSnapshot?.file) await autoSendPreRestore(preSnapshot.file, emit);
 
   const snapshot = preserveAuth ? await takeAuthSnapshot(emit) : null;
   const patcher = startLiveAuthPatcher(snapshot, emit);
-
   const started = Date.now();
   const excludesFiles = /\bfiles\b/.test(String(exclude || ""));
   const monitor = excludesFiles ? null : startAssetProgressMonitor(emit);
 
+  setStage?.("Importing data…", 30);
+
+  let cliError;
   let result;
   try {
-    try {
-      result = await runStrapiCli(buildImportArgs({ filePath, key, exclude, only }), { onLog, shouldAbort });
-    } catch (cliErr) {
-      emit(`[safeguard] import CLI failed: ${cliErr.message}`);
-      // Stop the patcher before starting the rollback CLI so they don't
-      // race each other on the same auth tables.
-      patcher.stop();
-      if (preSnapshot) {
-        await autoRollbackFromSnapshot(preSnapshot, emit, onLog);
-      } else {
-        emit(`[safeguard] WARNING: no pre-snapshot available — DB may be in a partial state, manual recovery needed`);
-      }
-      throw cliErr;
-    }
-  } finally {
+    result = await runStrapiCli(buildImportArgs({ filePath, key, exclude, only }), { onLog, shouldAbort });
+  } catch (err) {
+    cliError = err;
+    emit(`[safeguard] import CLI failed: ${err.message}`);
     patcher.stop();
-    if (monitor) monitor.stop();
-    // Always re-apply the auth snapshot, whether the CLI succeeded, failed,
-    // or failed-then-rolled-back. `replayAuthSnapshot` is internally safe
-    // (logs its own errors, never throws), so this runs unguarded.
-    if (snapshot) await replayAuthSnapshot(snapshot, emit);
+    if (preSnapshot) {
+      await autoRollbackFromSnapshot(preSnapshot, emit, onLog);
+    } else {
+      emit("[safeguard] WARNING: no pre-snapshot available — DB may be in a partial state, manual recovery needed");
+    }
   }
+
+  patcher.stop();
+  if (monitor) monitor.stop();
+  if (snapshot) await replayAuthSnapshot(snapshot, emit);
+  if (cliError) throw cliError;
 
   return {
     file: fileName,
@@ -227,12 +205,15 @@ const restoreBackup = async (
 
 const createBackupJob = (options = {}) => {
   assertDevConfig();
-  return runInBackground(JOB_TYPES.EXPORT, (onLog, shouldAbort) => createBackup({ ...options, shouldAbort }, onLog));
+  return runInBackground(JOB_TYPES.EXPORT, (onLog, shouldAbort, setStage) => {
+    setStage?.("Exporting…", 5);
+    return createBackup({ ...options, shouldAbort }, onLog);
+  });
 };
 
 const restoreBackupJob = (fileName, options = {}) => {
   assertDevConfig();
-  return runInBackground(JOB_TYPES.IMPORT, (onLog, shouldAbort) => restoreBackup(fileName, { ...options, shouldAbort }, onLog));
+  return runInBackground(JOB_TYPES.IMPORT, (onLog, shouldAbort, setStage) => restoreBackup(fileName, { ...options, shouldAbort }, onLog, setStage));
 };
 
 module.exports = () => ({

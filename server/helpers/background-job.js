@@ -26,7 +26,8 @@ const runInBackground = (type, operation) => {
   arm();
   (async () => {
     try {
-      const result = await operation((evt) => pushLog(job.id, evt), () => isAbortRequested(job.id));
+      const setStage = (stage, percent = 0) => updateJob(job.id, { progress: { stage, percent } });
+      const result = await operation((evt) => pushLog(job.id, evt), () => isAbortRequested(job.id), setStage);
       updateJob(job.id, {
         result,
         status: "success",

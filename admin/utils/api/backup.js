@@ -29,11 +29,6 @@ export const restoreBackup = async (file, options = {}) => {
 };
 
 export const downloadBackup = async (file, onProgress) => {
-  // Strapi v5's `getFetchClient` always runs the response through `.json()` and
-  // returns `{ data: [] }` on parse error — that turns every binary download
-  // into a 0 KB file. Bypass it and use native fetch so we can stream the body
-  // and report progress instead of blocking silently until the whole archive
-  // has buffered into memory.
   const url = `${getBackendUrl()}${basePath}/backup/${encoded(file)}/download`;
   const token = readAuthToken();
   const response = await fetch(url, {
@@ -62,7 +57,7 @@ export const downloadBackup = async (file, onProgress) => {
 
   const chunks = [];
   let received = 0;
-  for (;;) {
+  for (; ;) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
@@ -73,13 +68,42 @@ export const downloadBackup = async (file, onProgress) => {
   return { data: new Blob(chunks) };
 };
 
-export const uploadBackup = async (file, { key = "" } = {}) => {
-  const { post } = getFetchClient();
+export const uploadBackup = async (file, { key = "", onProgress } = {}) => {
   const form = new FormData();
   form.append("file", file);
   if (key) form.append("key", key);
-  const { data } = await post(`${basePath}/backup/upload`, form);
-  return data?.data;
+
+  if (!onProgress) {
+    const { post } = getFetchClient();
+    const { data } = await post(`${basePath}/backup/upload`, form);
+    return data?.data;
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${getBackendUrl()}${basePath}/backup/upload`);
+    const token = readAuthToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded, e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText)?.data);
+        } catch {
+          reject(new Error("Invalid server response"));
+        }
+      } else {
+        let msg = `Upload failed (HTTP ${xhr.status})`;
+        try { msg = JSON.parse(xhr.responseText)?.error?.message || msg; } catch { /* ignore */ }
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Upload failed: network error"));
+    xhr.onabort = () => reject(new Error("Upload aborted"));
+    xhr.send(form);
+  });
 };
 
 export const getBackupLimits = async () => {

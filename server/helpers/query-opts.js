@@ -48,8 +48,8 @@ const buildBackupCreateOpts = (body, cfg) => {
 const resolveSnapshotMode = (body, cfg) => {
   const raw = body.preRestoreSnapshot !== undefined ? body.preRestoreSnapshot : cfg.preRestoreSnapshot;
   if (raw === false || raw === "false" || raw === "off") return "off";
-  if (raw === "db-only" || raw === "dbonly") return "db-only";
-  return "full";
+  if (raw === "full") return "full";
+  return "db-only";
 };
 
 const buildRestoreOpts = (body, cfg) => ({

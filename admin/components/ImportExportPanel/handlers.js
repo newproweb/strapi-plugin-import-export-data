@@ -47,8 +47,8 @@ export const stageUpload = async (file, key, { notify, reload, reset }) => {
 // restore response (`{ jobId }` or `{ needsSchemaConfirm, schemaDiff }`) plus
 // the staged file name so the caller can re-restore it after a schema confirm
 // without re-uploading.
-export const importUpload = async (file, key, restoreOptions, { notify, reload }) => {
-  const staged = await uploadBackup(file, { key: key || undefined });
+export const importUpload = async (file, key, restoreOptions, { notify, reload, onUploadProgress }) => {
+  const staged = await uploadBackup(file, { key: key || undefined, onProgress: onUploadProgress });
   await reload();
   notify({ type: "info", message: "File uploaded — checking schema…" });
   const response = await restoreBackup(staged.file, { key: key || undefined, ...restoreOptions });

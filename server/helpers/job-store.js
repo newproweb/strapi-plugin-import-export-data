@@ -65,9 +65,6 @@ const newJobId = () =>
 const blankJob = (type) => ({
   id: newJobId(),
   type,
-  // Random per-job token — lets the progress route authenticate a poll
-  // without an admin DB session, so the modal survives an import that has
-  // wiped the auth tables.
   token: crypto.randomBytes(18).toString("hex"),
   status: "running",
   startedAt: Date.now(),
@@ -80,8 +77,6 @@ const blankJob = (type) => ({
   transferComplete: false,
   result: null,
   error: null,
-  // Owner identity — used by `prune()` to detect abandoned jobs the moment
-  // the parent process dies, instead of waiting STUCK_JOB_MS for log silence.
   ownerPid: process.pid,
   ownerHost: HOSTNAME,
 });

@@ -11,6 +11,7 @@ const UploadDropzone = ({
   dragOver,
   working,
   limits,
+  uploadProgress,
   onFile,
   onKey,
   onDragOver,
@@ -81,6 +82,31 @@ const UploadDropzone = ({
               Import &amp; seed
             </Button>
           </Flex>
+        )}
+
+        {uploadProgress && (
+          <Box width="100%" paddingTop={3} paddingBottom={3}>
+            <Box
+              style={{
+                height: 4,
+                background: "var(--strapi-colors-neutral200, #e0e0e0)",
+                borderRadius: 2,
+                overflow: "hidden",
+              }}
+            >
+              <Box
+                style={{
+                  height: "100%",
+                  width: `${uploadProgress.total ? Math.round((uploadProgress.loaded / uploadProgress.total) * 100) : 0}%`,
+                  background: "var(--strapi-colors-primary500, #4945ff)",
+                  transition: "width 0.15s ease",
+                }}
+              />
+            </Box>
+            <Typography variant="pi" textColor="neutral500" textAlign="center">
+              {`Uploading… ${uploadProgress.total ? Math.round((uploadProgress.loaded / uploadProgress.total) * 100) : 0}%`}
+            </Typography>
+          </Box>
         )}
 
         {file && tooBig && (
