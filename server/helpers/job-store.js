@@ -5,6 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 const { backupDir } = require("../utils/fs");
+const { safeWarn } = require("../utils/log");
 const { JOB_TTL_MS } = require("../constants/backup");
 
 // Cross-replica fallback: if `logLines[last].at` is older than this and we
@@ -18,16 +19,6 @@ const PID_RECHECK_GRACE_MS = 30 * 1000;
 const LOCK_TTL_MS = 30 * 60 * 1000;
 const FLUSH_DEBOUNCE_MS = 200;
 const HOSTNAME = require("os").hostname();
-
-// `_writeCached` and `prune` run inside setTimeout / scheduled callbacks that
-// can fire mid-reload while `strapi develop` is swapping the global instance.
-// Logging via `strapi.log.warn` directly would raise ReferenceError and crash
-// the process — wrap in a defensive helper that no-ops if the global is gone.
-const safeWarn = (msg) => {
-  try {
-    if (typeof strapi !== "undefined" && strapi?.log?.warn) strapi.log.warn(msg);
-  } catch { /* ignore */ }
-};
 
 const ensureDir = (dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -283,6 +274,12 @@ class FileJobMutex {
     return data ? data.label : null;
   }
 
+  /**
+   * Atomically claims the mutex via `fs.writeFileSync(..., { flag: "wx" })`.
+   * If a stale lock exists (older than `LOCK_TTL_MS`), it is reclaimed with a
+   * single bounded unlink+retry cycle — never a second unconditional write,
+   * which would re-open the TOCTOU window between two competing replicas.
+   */
   acquire(label, jobId) {
     ensureDir(jobsRoot());
     const data = JSON.stringify({ label, jobId, acquiredAt: Date.now(), pid: process.pid });
@@ -294,16 +291,22 @@ class FileJobMutex {
       if (err.code !== "EEXIST") throw err;
     }
 
-    const existing = this.current();
-    if (!existing) {
+    const existing = readJson(lockPath());
+    const stale = existing && Date.now() - (existing.acquiredAt || 0) > LOCK_TTL_MS;
+
+    if (stale) {
+      try { fs.unlinkSync(lockPath()); } catch { /* another replica may have unlinked it first */ }
       try {
         fs.writeFileSync(lockPath(), data, { flag: "wx" });
         return;
-      } catch { /* fall through to busy error */ }
+      } catch (err) {
+        if (err.code !== "EEXIST") throw err;
+      }
     }
 
-    const existingLabel = (existing && existing.label) || "backup";
-    const existingId = (existing && existing.jobId) || "?";
+    const fresh = readJson(lockPath()) || existing || {};
+    const existingLabel = fresh.label || "backup";
+    const existingId = fresh.jobId || "?";
     const e = new Error(
       `Another ${existingLabel} job is already running (id=${existingId}) — wait for it to finish or cancel it before starting ${label}.`,
     );

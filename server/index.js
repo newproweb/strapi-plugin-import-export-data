@@ -7,6 +7,9 @@ const controllers = require("./controllers");
 const { recoverPending } = require("./helpers/pad-tracker");
 const { getJobStore } = require("./helpers/job-store");
 const { knex, dialect, isSqlite } = require("./helpers/dialect");
+const { mountTusMiddleware } = require("./helpers/tus-middleware");
+const { resetTusServer } = require("./helpers/tus-server");
+const { getActiveChildren, gracefulKill } = require("./helpers/cli");
 const { PLUGIN_ACTIONS, PLUGIN } = require("./constants/permissions");
 
 const registerPermissions = async ({ strapi }) => {
@@ -30,6 +33,8 @@ module.exports = {
   },
 
   async bootstrap({ strapi }) {
+    mountTusMiddleware(strapi);
+
     // SQLite allows a single writer and blocks readers in the default DELETE
     // journal mode. During a long `strapi import` CLI run that writer lock
     // stalls the live server's admin-auth reads (strapi_sessions) until they
@@ -93,5 +98,28 @@ module.exports = {
     } catch (error) {
       strapi.log.error(`[import-export] bootstrap schedule failed: ${error.message}`);
     }
+  },
+
+  /**
+   * Lifecycle teardown. Fires on `strapi develop` reloads and on graceful
+   * shutdown. Best-effort: every step is wrapped so one failure does not
+   * block the others. Without this, reloads leak: cron registers twice,
+   * the tus server holds stale listeners, and orphaned CLI children keep
+   * writing to the DB after the parent is replaced.
+   */
+  async destroy({ strapi }) {
+    try { await strapi.plugin(PLUGIN).service("scheduleService").unregister(); }
+    catch (err) { strapi.log.warn(`[import-export] destroy: schedule unregister failed: ${err.message}`); }
+
+    try {
+      const children = getActiveChildren();
+      if (children.size > 0) {
+        strapi.log.warn(`[import-export] destroy: terminating ${children.size} active CLI child(ren) with SIGTERM`);
+        for (const child of children) gracefulKill(child);
+      }
+    } catch (err) { strapi.log.warn(`[import-export] destroy: child cleanup failed: ${err.message}`); }
+
+    try { resetTusServer(); }
+    catch (err) { strapi.log.warn(`[import-export] destroy: tus server reset failed: ${err.message}`); }
   },
 };

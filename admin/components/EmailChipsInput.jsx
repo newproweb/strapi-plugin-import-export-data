@@ -2,6 +2,8 @@ import React, { useState } from "react";
 
 import { Flex, Field, TextInput, Typography } from "@strapi/design-system";
 
+import HintTooltip from "./HintTooltip";
+
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const CHIP_STYLE = { background: "#4945ff", borderRadius: 4, padding: "2px 4px 2px 8px" };
@@ -46,7 +48,14 @@ const EmailChipsInput = ({ label, hint, value, onChange }) => {
 
   return (
     <Field.Root>
-      {label && <Field.Label marginBottom={2}>{label}</Field.Label>}
+      {label && (
+        <Field.Label
+          marginBottom={2}
+          action={hint ? <HintTooltip label={hint} ariaLabel={`${label} help`} /> : undefined}
+        >
+          {label}
+        </Field.Label>
+      )}
       {emails.length > 0 && (
         <Flex gap={1} wrap="wrap" marginBottom={2}>
           {emails.map((email) => (
@@ -73,7 +82,6 @@ const EmailChipsInput = ({ label, hint, value, onChange }) => {
         placeholder="type an email and press Enter"
       />
       {error && <Typography variant="pi" textColor="danger600" marginTop={1}>{error}</Typography>}
-      {hint && <Typography variant="pi" textColor="neutral500" marginTop={1}>{hint}</Typography>}
     </Field.Root>
   );
 };

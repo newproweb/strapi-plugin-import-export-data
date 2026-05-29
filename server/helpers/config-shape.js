@@ -1,6 +1,7 @@
 "use strict";
 
 const { normalizeRecipients } = require("./transfer");
+const { PRE_RESTORE_MODES } = require("../constants/store");
 
 const MASKED_KEY = "••••••";
 
@@ -12,6 +13,13 @@ const assignIfDefined = (target, source, key, transform = (value) => value) => {
   if (source[key] !== undefined) target[key] = transform(source[key]);
 };
 
+const normalizePreRestoreInput = (value) => {
+  if (value === true || value === "true") return "full";
+  if (value === false || value === "false") return "off";
+  if (typeof value === "string" && PRE_RESTORE_MODES.includes(value)) return value;
+  return "full";
+};
+
 const buildSchedulePatch = (body) => {
   const patch = {};
   assignIfString(patch, body, "backupSchedule");
@@ -21,12 +29,19 @@ const buildSchedulePatch = (body) => {
   assignIfDefined(patch, body, "retention");
   assignIfDefined(patch, body, "autoExcludeFiles", Boolean);
   assignIfDefined(patch, body, "adoptOrphans", Boolean);
-  assignIfDefined(patch, body, "preRestoreSnapshot", Boolean);
+  assignIfDefined(patch, body, "preRestoreSnapshot", normalizePreRestoreInput);
   assignIfDefined(patch, body, "transferRecipients", normalizeRecipients);
   return patch;
 };
 
 const maskEncryptionKey = (value) => (value ? MASKED_KEY : "");
+
+const readPreRestoreMode = (raw) => {
+  if (raw === true) return "full";
+  if (raw === false) return "off";
+  if (typeof raw === "string" && PRE_RESTORE_MODES.includes(raw)) return raw;
+  return "full";
+};
 
 const toPublicConfig = (cfg) => ({
   backupSchedule: cfg.backupSchedule,
@@ -35,7 +50,7 @@ const toPublicConfig = (cfg) => ({
   retention: cfg.retention,
   autoExcludeFiles: cfg.autoExcludeFiles,
   adoptOrphans: Boolean(cfg.adoptOrphans),
-  preRestoreSnapshot: cfg.preRestoreSnapshot !== false,
+  preRestoreSnapshot: readPreRestoreMode(cfg.preRestoreSnapshot),
   transferRecipients: Array.isArray(cfg.transferRecipients) ? cfg.transferRecipients : [],
   lastBackupAt: cfg.lastBackupAt || null,
 });

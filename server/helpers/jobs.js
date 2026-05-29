@@ -161,7 +161,8 @@ const pushLog = (jobId, { stream, line }) => {
     job.lastLine = line;
     job.lastStream = stream;
     if (!Array.isArray(job.logLines)) job.logLines = [];
-    job.logLines.push({ stream, line, at: Date.now() });
+    job.logSeq = (job.logSeq || 0) + 1;
+    job.logLines.push({ stream, line, at: Date.now(), seq: job.logSeq });
     if (job.logLines.length > MAX_LOG_LINES) job.logLines.shift();
     updateProgressFromLine(job, line);
   });

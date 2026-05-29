@@ -8,6 +8,11 @@ import {
   clearFullSeedPending, restoreBackup,
 } from "../../utils/api";
 import { readServerError } from "../../utils/format";
+import SectionHeading from "../SectionHeading";
+
+const DESCRIPTION =
+  "Seeds an archive into a project that does not yet have its content-types — writes the "
+  + "missing schema into src/, restarts Strapi, then imports the data.";
 
 const UidList = ({ label, uids, color }) => {
   if (!uids || uids.length === 0) return null;
@@ -98,92 +103,105 @@ const FullSeedCard = ({ onStartJob, notify }) => {
     && plan.contentTypesToCreate.length === 0
     && plan.componentsToCreate.length === 0;
 
-  return (
-    <Box padding={5} hasRadius background="neutral0" shadow="tableShadow">
-      <Flex direction="column" gap={3} alignItems="stretch">
-        <Flex direction="column" gap={1} alignItems="center">
-          <Upload />
-          <Typography variant="delta">Import &amp; Create</Typography>
-          <Typography variant="pi" textColor="neutral600" textAlign="center">
-            Seeds an archive into a project that does not yet have its content-types — writes the
-            missing schema into <code>src/</code>, restarts Strapi, then imports the data.
+  const fileInput = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept=".tar,.gz"
+      style={{ display: "none" }}
+      onChange={onPick}
+    />
+  );
+
+  const renderIdle = () => (
+    <>
+      {fileInput}
+      <SectionHeading
+        icon={<Upload width="1.5rem" height="1.5rem" />}
+        title="Import & Create"
+        subtitle={DESCRIPTION}
+        actions={(
+          <Button variant="secondary" startIcon={<Upload />} onClick={() => fileRef.current?.click()}>
+            Choose archive
+          </Button>
+        )}
+      />
+    </>
+  );
+
+  const renderHeader = () => (
+    <SectionHeading
+      icon={<Upload width="1.5rem" height="1.5rem" />}
+      title="Import & Create"
+      subtitle={DESCRIPTION}
+    />
+  );
+
+  const renderPlan = () => (
+    <Flex direction="column" gap={3} alignItems="stretch">
+      <UidList label="Content-types to create" uids={plan.contentTypesToCreate} color="primary600" />
+      <UidList label="Components to create" uids={plan.componentsToCreate} color="primary600" />
+      {plan.missingPlugins?.length > 0 && (
+        <Flex direction="column" gap={1} alignItems="stretch">
+          <Typography variant="sigma" textColor="warning600">
+            Needs these plugins installed — their data will be skipped ({plan.missingPlugins.length})
           </Typography>
+          <Box padding={2} background="warning100" hasRadius>
+            <Typography variant="pi">{plan.missingPlugins.join(", ")}</Typography>
+          </Box>
         </Flex>
-
-        {phase === "loading" && <Flex justifyContent="center"><Loader small>Loading…</Loader></Flex>}
-
-        {phase === "idle" && (
-          <Flex justifyContent="center">
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".tar,.gz"
-              style={{ display: "none" }}
-              onChange={onPick}
-            />
-            <Button variant="secondary" startIcon={<Upload />} onClick={() => fileRef.current?.click()}>
-              Choose archive
-            </Button>
-          </Flex>
-        )}
-
-        {phase === "analyzing" && <Flex justifyContent="center"><Loader small>Analyzing archive…</Loader></Flex>}
-
-        {phase === "plan" && plan && (
-          <Flex direction="column" gap={3} alignItems="stretch">
-            <UidList label="Content-types to create" uids={plan.contentTypesToCreate} color="primary600" />
-            <UidList label="Components to create" uids={plan.componentsToCreate} color="primary600" />
-            {plan.missingPlugins?.length > 0 && (
-              <Flex direction="column" gap={1} alignItems="stretch">
-                <Typography variant="sigma" textColor="warning600">
-                  Needs these plugins installed — their data will be skipped ({plan.missingPlugins.length})
-                </Typography>
-                <Box padding={2} background="warning100" hasRadius>
-                  <Typography variant="pi">{plan.missingPlugins.join(", ")}</Typography>
-                </Box>
-              </Flex>
-            )}
-            {noWork && (
-              <Typography variant="pi" textColor="success600">
-                Schema already matches this project — nothing to create. Use the normal Import zone instead.
-              </Typography>
-            )}
-            <Flex gap={2} justifyContent="flex-end">
-              <Button variant="tertiary" onClick={() => setPhase("idle")}>Cancel</Button>
-              <Button variant="default" onClick={onSync} disabled={noWork}>
-                Create schema &amp; restart
-              </Button>
-            </Flex>
-          </Flex>
-        )}
-
-        {phase === "syncing" && <Flex justifyContent="center"><Loader small>Writing schema files…</Loader></Flex>}
-
-        {phase === "restarting" && (
-          <Typography variant="pi" textColor="warning600" textAlign="center">
-            Strapi is restarting to pick up the new content-types. Reload this page in ~10 seconds —
-            an &quot;Import data now&quot; button will appear here.
-          </Typography>
-        )}
-
-        {phase === "pending" && pending && (
-          <Flex direction="column" gap={3} alignItems="stretch">
-            <Typography variant="pi" textColor="success600" textAlign="center">
-              Schema synced — {pending.created?.contentTypes?.length || 0} content-type(s) and{" "}
-              {pending.created?.components?.length || 0} component(s) created.
-            </Typography>
-            <Typography variant="pi" textColor="neutral600" textAlign="center">
-              Ready to import data from <code>{pending.archive}</code>.
-            </Typography>
-            <Flex gap={2} justifyContent="center">
-              <Button variant="tertiary" onClick={onDiscard}>Discard</Button>
-              <Button variant="default" onClick={onImport}>Import data now</Button>
-            </Flex>
-          </Flex>
-        )}
-
-        {phase === "importing" && <Flex justifyContent="center"><Loader small>Starting import…</Loader></Flex>}
+      )}
+      {noWork && (
+        <Typography variant="pi" textColor="success600">
+          Schema already matches this project — nothing to create. Use the normal Import zone instead.
+        </Typography>
+      )}
+      <Flex gap={2} justifyContent="flex-end">
+        <Button variant="tertiary" onClick={() => setPhase("idle")}>Cancel</Button>
+        <Button variant="default" onClick={onSync} disabled={noWork}>
+          Create schema &amp; restart
+        </Button>
       </Flex>
+    </Flex>
+  );
+
+  const renderPending = () => (
+    <Flex direction="column" gap={3} alignItems="stretch">
+      <Typography variant="pi" textColor="success600" textAlign="center">
+        Schema synced — {pending.created?.contentTypes?.length || 0} content-type(s) and{" "}
+        {pending.created?.components?.length || 0} component(s) created.
+      </Typography>
+      <Typography variant="pi" textColor="neutral600" textAlign="center">
+        Ready to import data from <code>{pending.archive}</code>.
+      </Typography>
+      <Flex gap={2} justifyContent="center">
+        <Button variant="tertiary" onClick={onDiscard}>Discard</Button>
+        <Button variant="default" onClick={onImport}>Import data now</Button>
+      </Flex>
+    </Flex>
+  );
+
+  const renderBusy = () => (
+    <Flex direction="column" gap={3} alignItems="stretch">
+      {renderHeader()}
+      {phase === "loading" && <Flex justifyContent="center"><Loader small>Loading…</Loader></Flex>}
+      {phase === "analyzing" && <Flex justifyContent="center"><Loader small>Analyzing archive…</Loader></Flex>}
+      {phase === "plan" && plan && renderPlan()}
+      {phase === "syncing" && <Flex justifyContent="center"><Loader small>Writing schema files…</Loader></Flex>}
+      {phase === "restarting" && (
+        <Typography variant="pi" textColor="warning600" textAlign="center">
+          Strapi is restarting to pick up the new content-types. Reload this page in ~10 seconds —
+          an &quot;Import data now&quot; button will appear here.
+        </Typography>
+      )}
+      {phase === "pending" && pending && renderPending()}
+      {phase === "importing" && <Flex justifyContent="center"><Loader small>Starting import…</Loader></Flex>}
+    </Flex>
+  );
+
+  return (
+    <Box borderColor="neutral200" padding={5} hasRadius background="neutral0" shadow="filterShadow">
+      {phase === "idle" ? renderIdle() : renderBusy()}
     </Box>
   );
 };

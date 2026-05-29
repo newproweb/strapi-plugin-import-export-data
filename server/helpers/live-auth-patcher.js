@@ -172,14 +172,13 @@ const startLiveAuthPatcher = (snapshot, emit, { intervalMs = DEFAULT_INTERVAL_MS
   let cumulativePatched = 0;
   let checksRun = 0;
   let reinjections = 0;
-  let lastTickBusy = false;
+  let inFlight = null;
   let errorsLogged = 0;
   const errorCounts = new Map();
 
-  const tick = async () => {
-    if (stopped || lastTickBusy) return;
+  const runTick = async () => {
+    if (stopped) return;
     if (typeof strapi === "undefined" || !strapi || !strapi.db) return;
-    lastTickBusy = true;
 
     const errorBucket = [];
     try {
@@ -210,20 +209,31 @@ const startLiveAuthPatcher = (snapshot, emit, { intervalMs = DEFAULT_INTERVAL_MS
       emit?.(`[live-auth] import wiped admin auth — re-injected ${patched} row(s) (re-inject #${reinjections})`);
     } catch (err) {
       emit?.(`[live-auth] tick failed: ${err && err.message ? err.message : String(err)}`);
-    } finally {
-      lastTickBusy = false;
     }
+  };
+
+  const tick = () => {
+    if (stopped || inFlight) return;
+    inFlight = runTick().finally(() => { inFlight = null; });
   };
 
   const timer = setInterval(tick, intervalMs);
   tick();
 
   return {
-    stop: () => {
+    /**
+     * Halts the patcher and awaits any in-flight tick so a tick mid-write
+     * cannot race with `replayAuthSnapshot` — the snapshot replay must be
+     * the LAST writer or it gets overwritten by stale data.
+     */
+    stop: async () => {
       if (stopAnnounced) return;
       stopAnnounced = true;
       stopped = true;
       clearInterval(timer);
+      if (inFlight) {
+        try { await inFlight; } catch { /* tick errors already surfaced via emit */ }
+      }
       const errorSummary = errorCounts.size === 0
         ? ""
         : ` (errors during run: ${[...errorCounts.entries()].map(([k, c]) => `${c}× ${k}`).join("; ")})`;

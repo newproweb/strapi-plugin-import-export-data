@@ -34,12 +34,14 @@ const closeLabel = ({ isRunning, transferComplete }) => {
   return "Close";
 };
 
+const ELAPSED_TICK_MS = 1000;
+
 const useElapsed = (job) => {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!job || job.status !== "running") return undefined;
-    const id = setInterval(() => setTick((t) => t + 1), 250);
+    const id = setInterval(() => setTick((t) => t + 1), ELAPSED_TICK_MS);
     return () => clearInterval(id);
   }, [job?.status]);
 

@@ -49,30 +49,34 @@ const resolveLocalUploadPath = (urlPath) => {
 };
 
 const UPLOAD_PAGE_SIZE = 500;
+const PAD_WRITE_CONCURRENCY = 16;
 
-const readAllUploadRows = async () => {
-  try {
-    const all = [];
-    let offset = 0;
-    while (true) {
-      const batch = await strapi.db.query("plugin::upload.file").findMany({
+/**
+ * Yields plugin::upload.file rows page-by-page without buffering the full
+ * table in RAM. A 200k-row DB was pulling ~400 queries' worth of rows into
+ * memory before the export even started — now each batch is consumed and
+ * dropped before the next is fetched.
+ */
+async function* streamUploadRows() {
+  let offset = 0;
+  while (true) {
+    let batch;
+    try {
+      batch = await strapi.db.query("plugin::upload.file").findMany({
         limit: UPLOAD_PAGE_SIZE,
         offset,
         orderBy: { id: "asc" },
       });
-
-      if (!batch || batch.length === 0) break;
-      all.push(...batch);
-
-      if (batch.length < UPLOAD_PAGE_SIZE) break;
-      offset += UPLOAD_PAGE_SIZE;
+    } catch (err) {
+      strapi.log.warn(`[import-export] streamUploadRows failed: ${err.message}`);
+      return;
     }
-    return all;
-  } catch (err) {
-    strapi.log.warn(`[import-export] readAllUploadRows failed: ${err.message}`);
-    return null;
+    if (!batch || batch.length === 0) return;
+    for (const row of batch) yield row;
+    if (batch.length < UPLOAD_PAGE_SIZE) return;
+    offset += UPLOAD_PAGE_SIZE;
   }
-};
+}
 
 const canonicalLocalPath = (hash, ext) => {
   if (!hash || typeof hash !== "string") return null;
@@ -107,10 +111,10 @@ const collectTargetPaths = (row) => {
   return targets;
 };
 
-const writePlaceholder = (full) => {
+const writePlaceholder = async (full) => {
   try {
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, "");
+    await fs.promises.mkdir(path.dirname(full), { recursive: true });
+    await fs.promises.writeFile(full, "");
     return true;
   } catch (err) {
     strapi.log.warn(`[import-export] pad placeholder ${full} failed: ${err.message}`);
@@ -118,39 +122,73 @@ const writePlaceholder = (full) => {
   }
 };
 
+const pathExists = (full) => fs.promises.access(full).then(() => true).catch(() => false);
+
+/**
+ * Pads every missing upload file referenced by `plugin::upload.file` with an
+ * empty placeholder. Rows are streamed from the DB to avoid loading the whole
+ * table into RAM, and the placeholder writes run with a bounded concurrency
+ * pool so a 10k-row pad does not block the event loop with sync IO.
+ */
 const padMissingUploadFiles = async (emit) => {
   const created = [];
-  const rows = await readAllUploadRows();
-  if (!rows) {
-    if (emit) emit(`[pad] could not read plugin::upload.file — skipping placeholder pad`);
-    return created;
+  let scanned = 0;
+  let active = 0;
+  const queue = [];
+
+  const drain = () => new Promise((resolve) => {
+    const check = () => {
+      if (active === 0 && queue.length === 0) resolve();
+      else setTimeout(check, 50).unref();
+    };
+    check();
+  });
+
+  const tryWrite = async (full) => {
+    if (await pathExists(full)) return;
+    if (await writePlaceholder(full)) created.push(full);
+  };
+
+  const schedule = (full) => {
+    queue.push(full);
+    pump();
+  };
+
+  const pump = () => {
+    while (active < PAD_WRITE_CONCURRENCY && queue.length > 0) {
+      const full = queue.shift();
+      active += 1;
+      tryWrite(full).finally(() => { active -= 1; pump(); });
+    }
+  };
+
+  for await (const row of streamUploadRows()) {
+    scanned += 1;
+    for (const full of collectTargetPaths(row)) schedule(full);
   }
 
-  for (const row of rows) {
-    for (const full of collectTargetPaths(row)) {
-      if (fs.existsSync(full)) continue;
-      if (writePlaceholder(full)) created.push(full);
-    }
-  }
+  await drain();
 
   if (created.length > 0) recordPending(created);
 
   if (!emit) return created;
-  if (created.length === 0) {
-    emit(`[pad] all ${rows.length} upload_file row(s) resolved to existing files — no placeholders needed`);
+  if (scanned === 0) {
+    emit("[pad] could not read plugin::upload.file — skipping placeholder pad");
+  } else if (created.length === 0) {
+    emit(`[pad] all ${scanned} upload_file row(s) resolved to existing files — no placeholders needed`);
   } else {
-    emit(`[pad] created ${created.length} empty placeholder file(s) for missing uploads (scanned ${rows.length} rows)`);
+    emit(`[pad] created ${created.length} empty placeholder file(s) for missing uploads (scanned ${scanned} rows)`);
   }
 
   return created;
 };
 
-const cleanupPaddedFiles = (created, emit) => {
+const cleanupPaddedFiles = async (created, emit) => {
   if (!created || created.length === 0) return;
   let removed = 0;
-  for (const p of created) {
-    try { fs.unlinkSync(p); removed += 1; } catch { /* ignore */ }
-  }
+  await Promise.all(created.map(async (p) => {
+    try { await fs.promises.unlink(p); removed += 1; } catch { /* ignore */ }
+  }));
   clearPending(created);
   if (emit) emit(`[pad] removed ${removed} placeholder file(s)`);
 };

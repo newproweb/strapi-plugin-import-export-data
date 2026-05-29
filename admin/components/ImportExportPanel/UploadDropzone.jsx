@@ -5,7 +5,31 @@ import { Upload } from "@strapi/icons";
 
 import { formatBytes } from "../../utils/format";
 
-const UploadDropzone = ({
+const STAGE_LABEL = {
+  uploading: (pct) => `Uploading… ${pct}%`,
+  finalizing: () => "Saving file…",
+  starting: () => "Starting import…",
+};
+
+const STRIPE_KEYFRAMES = `
+  @keyframes iedp-stripe {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+  }
+`;
+
+const computePercent = (progress) => {
+  if (!progress || !progress.total) return 0;
+  return Math.round((progress.loaded / progress.total) * 100);
+};
+
+const resolveStage = (progress) => {
+  if (!progress) return null;
+  if (progress.stage && progress.stage !== "uploading") return progress.stage;
+  return "uploading";
+};
+
+export const UploadDropzone = ({
   file,
   encryptionKey,
   dragOver,
@@ -26,6 +50,122 @@ const UploadDropzone = ({
   const tooBig = Boolean(maxBytes && file && file.size > maxBytes);
   const busy = Boolean(limits?.busy);
 
+  const percent = computePercent(uploadProgress);
+  const stage = resolveStage(uploadProgress);
+  const indeterminate = stage === "finalizing" || stage === "starting";
+  const stageLabel = stage === "uploading" ? STAGE_LABEL.uploading(percent) : stage && STAGE_LABEL[stage]?.();
+
+  const handleFileChange = (e) => onFile(e.target.files?.[0] || null);
+
+  const renderProgress = () => {
+    if (!uploadProgress) return null;
+    return (
+      <Box width="100%" paddingTop={3} paddingBottom={3}>
+        <Box
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={indeterminate ? undefined : percent}
+          aria-label={stageLabel}
+          style={{
+            height: 4,
+            background: "var(--strapi-colors-neutral200, #e0e0e0)",
+            borderRadius: 2,
+            overflow: "hidden",
+            position: "relative",
+          }}
+        >
+          {indeterminate ? (
+            <Box
+              style={{
+                position: "absolute",
+                inset: 0,
+                backgroundImage:
+                  "linear-gradient(90deg, var(--strapi-colors-primary500, #4945ff) 30%, transparent 30%, transparent 70%, var(--strapi-colors-primary500, #4945ff) 70%)",
+                backgroundSize: "200% 100%",
+                animation: "iedp-stripe 1.2s linear infinite",
+              }}
+            />
+          ) : (
+            <Box
+              style={{
+                height: "100%",
+                width: `${percent}%`,
+                background: "var(--strapi-colors-primary500, #4945ff)",
+                transition: "width 0.3s ease-out",
+              }}
+            />
+          )}
+        </Box>
+        <Typography variant="pi" textColor="neutral500" textAlign="center">
+          {stageLabel}
+        </Typography>
+        <style>{STRIPE_KEYFRAMES}</style>
+      </Box>
+    );
+  };
+
+  const renderEncryptionField = () => {
+    if (!file || !isEncrypted) return null;
+    return (
+      <Field.Root style={{ minWidth: 240 }}>
+        <Field.Label>Encryption key</Field.Label>
+        <TextInput
+          type="password"
+          value={encryptionKey}
+          onChange={(e) => onKey(e.target.value)}
+        />
+      </Field.Root>
+    );
+  };
+
+  const renderActions = () => {
+    if (!file) return null;
+    const disabled = working || tooBig || busy;
+    return (
+      <Flex gap={2} wrap="wrap" justifyContent="center">
+        <Button variant="tertiary" onClick={onStage} disabled={disabled}>Save only</Button>
+        <Button
+          variant="default"
+          startIcon={<Upload />}
+          onClick={onImport}
+          loading={working}
+          disabled={disabled}
+        >
+          Import &amp; seed
+        </Button>
+      </Flex>
+    );
+  };
+
+  const renderHints = () => (
+    <>
+      {file && tooBig && (
+        <Typography variant="pi" textColor="danger600" textAlign="center">
+          Archive is {formatBytes(file.size)} — exceeds Strapi body limit of {maxLabel}.
+          Raise <code>strapi::body</code> formidable.maxFileSize and the reverse-proxy
+          <code>client_max_body_size</code>, then restart Strapi.
+        </Typography>
+      )}
+      {busy && (
+        <Typography variant="pi" textColor="warning600" textAlign="center">
+          A {limits?.busyLabel || "backup"} job is currently running — wait for it to finish.
+        </Typography>
+      )}
+      {maxLabel && !tooBig && (
+        <Typography variant="pi" textColor="neutral500" textAlign="center">
+          Max archive size: {maxLabel}
+        </Typography>
+      )}
+      {file && !tooBig && (
+        <Typography variant="pi" textColor="warning600" textAlign="center">
+          "Import &amp; seed" wipes current DB and uploads, then replays
+          {" "}<code>strapi import --file … --force</code>.
+        </Typography>
+      )}
+    </>
+  );
+
   return (
     <Box
       flex="1"
@@ -39,10 +179,13 @@ const UploadDropzone = ({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      style={{ transition: "background-color 0.2s ease, border-color 0.2s ease" }}
     >
       <Flex direction="column" gap={2} alignItems="center">
-        <Upload width="2rem" height="2rem" />
-        <Typography fontWeight="semiBold">Import database</Typography>
+        <Flex background="primary100" textColor="primary600" hasRadius padding={3} aria-hidden="true">
+          <Upload width="1.75rem" height="1.75rem" />
+        </Flex>
+        <Typography variant="delta">Import database</Typography>
         <Typography textAlign="center" textColor="neutral600">
           {file
             ? `Selected: ${file.name}`
@@ -52,89 +195,17 @@ const UploadDropzone = ({
           <input
             type="file"
             accept=".tar,.gz,.enc"
-            onChange={(e) => onFile(e.target.files?.[0] || null)}
+            onChange={handleFileChange}
             style={{ display: "none" }}
+            aria-label="Choose archive file"
           />
           <Button tag="span" variant="tertiary">Browse file</Button>
         </label>
 
-        {file && isEncrypted && (
-          <Field.Root style={{ minWidth: 240 }}>
-            <Field.Label>Encryption key</Field.Label>
-            <TextInput
-              type="password"
-              value={encryptionKey}
-              onChange={(e) => onKey(e.target.value)}
-            />
-          </Field.Root>
-        )}
-
-        {file && (
-          <Flex gap={2} wrap="wrap" justifyContent="center">
-            <Button variant="tertiary" onClick={onStage} disabled={working || tooBig || busy}>Save only</Button>
-            <Button
-              variant="default"
-              startIcon={<Upload />}
-              onClick={onImport}
-              loading={working}
-              disabled={working || tooBig || busy}
-            >
-              Import &amp; seed
-            </Button>
-          </Flex>
-        )}
-
-        {uploadProgress && (
-          <Box width="100%" paddingTop={3} paddingBottom={3}>
-            <Box
-              style={{
-                height: 4,
-                background: "var(--strapi-colors-neutral200, #e0e0e0)",
-                borderRadius: 2,
-                overflow: "hidden",
-              }}
-            >
-              <Box
-                style={{
-                  height: "100%",
-                  width: `${uploadProgress.total ? Math.round((uploadProgress.loaded / uploadProgress.total) * 100) : 0}%`,
-                  background: "var(--strapi-colors-primary500, #4945ff)",
-                  transition: "width 0.15s ease",
-                }}
-              />
-            </Box>
-            <Typography variant="pi" textColor="neutral500" textAlign="center">
-              {`Uploading… ${uploadProgress.total ? Math.round((uploadProgress.loaded / uploadProgress.total) * 100) : 0}%`}
-            </Typography>
-          </Box>
-        )}
-
-        {file && tooBig && (
-          <Typography variant="pi" textColor="danger600" textAlign="center">
-            Archive is {formatBytes(file.size)} — exceeds Strapi body limit of {maxLabel}.
-            Raise <code>strapi::body</code> formidable.maxFileSize and the reverse-proxy
-            <code>client_max_body_size</code>, then restart Strapi.
-          </Typography>
-        )}
-
-        {busy && (
-          <Typography variant="pi" textColor="warning600" textAlign="center">
-            A {limits?.busyLabel || "backup"} job is currently running — wait for it to finish.
-          </Typography>
-        )}
-
-        {maxLabel && !tooBig && (
-          <Typography variant="pi" textColor="neutral500" textAlign="center">
-            Max archive size: {maxLabel}
-          </Typography>
-        )}
-
-        {file && !tooBig && (
-          <Typography variant="pi" textColor="warning600" textAlign="center">
-            "Import &amp; seed" wipes current DB and uploads, then replays
-            {" "}<code>strapi import --file … --force</code>.
-          </Typography>
-        )}
+        {renderEncryptionField()}
+        {renderActions()}
+        {renderProgress()}
+        {renderHints()}
       </Flex>
     </Box>
   );

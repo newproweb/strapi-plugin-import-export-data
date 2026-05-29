@@ -74,6 +74,7 @@ module.exports = {
     route("POST", "/backup/:file/transfer", "backupController.transfer", "download"),
     route("POST", "/backup/:file/restore", "backupController.restore", "restore"),
     route("POST", "/backup/upload", "backupController.upload", "restore"),
+    route("POST", "/backup/upload/tus/:id/finalize", "backupController.tusFinalize", "restore"),
     route("POST", "/backup/run-now", "backupController.runNow", "create"),
 
     // Full-seed (schema + data) — recreates missing schema from the archive
@@ -85,5 +86,10 @@ module.exports = {
     // Schedule/settings
     route("GET", "/backup-schedule", "backupController.getSchedule", "read"),
     route("POST", "/backup-schedule", "backupController.saveSchedule", "settings"),
+
+    // Orphan-adopt — scan public/uploads for files without a plugin::upload.file
+    // row and insert the missing rows. Diagnose is a read-only preview.
+    route("GET", "/orphans/diagnose", "backupController.diagnoseOrphans", "read"),
+    route("POST", "/orphans/adopt", "backupController.adoptOrphans", "create"),
   ],
 };

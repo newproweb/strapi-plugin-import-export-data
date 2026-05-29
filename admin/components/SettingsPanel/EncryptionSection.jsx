@@ -1,6 +1,14 @@
 import React from "react";
 
-import { Box, Flex, Typography, Field, TextInput } from "@strapi/design-system";
+import { Box, Field, TextInput } from "@strapi/design-system";
+import { Shield, Lock } from "@strapi/icons";
+
+import HintTooltip from "../HintTooltip";
+import SectionHeading from "../SectionHeading";
+
+const KEY_HINT =
+  "When set, scheduled auto-backups run encrypted (.tar.gz.enc) and you need this same key to restore. "
+  + "Strapi never stores the key anywhere else — losing it means losing access to encrypted archives.";
 
 const EncryptionSection = ({ cfg, onField }) => {
   const placeholder = cfg.encryptionKeySet
@@ -10,23 +18,23 @@ const EncryptionSection = ({ cfg, onField }) => {
   return (
     <Box borderColor="neutral200" padding={5} hasRadius shadow="filterShadow" marginBottom={4}>
       <Box paddingBottom={4}>
-        <Typography variant="beta">Encryption</Typography>
+        <SectionHeading
+          icon={<Shield width="1.5rem" height="1.5rem" />}
+          title="Security & Encryption"
+          subtitle="Encrypt scheduled backups with a key only you hold."
+        />
       </Box>
-      <Flex direction="column" gap={3} alignItems="stretch">
-        <Field.Root>
-          <Field.Label marginBottom={2}>Encryption key (optional)</Field.Label>
-          <TextInput
-            type="password"
-            value={cfg.encryptionKey || ""}
-            onChange={(e) => onField("encryptionKey", e.target.value)}
-            placeholder={placeholder}
-          />
-          <Typography variant="pi" textColor="neutral500" marginTop={1}>
-            When set, scheduled auto-backups run encrypted (<code>.tar.gz.enc</code>).
-            You'll need this same key to restore. Strapi does NOT save the key anywhere else — losing it means losing access to encrypted archives.
-          </Typography>
-        </Field.Root>
-      </Flex>
+      <Field.Root>
+        <Field.Label marginBottom={2}>Encryption key (optional)</Field.Label>
+        <TextInput
+          type="password"
+          value={cfg.encryptionKey || ""}
+          onChange={(e) => onField("encryptionKey", e.target.value)}
+          placeholder={placeholder}
+          startAction={<Lock aria-hidden width="1rem" height="1rem" fill="neutral500" />}
+          endAction={<HintTooltip label={KEY_HINT} ariaLabel="Encryption key help" />}
+        />
+      </Field.Root>
     </Box>
   );
 };

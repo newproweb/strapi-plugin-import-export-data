@@ -3,8 +3,15 @@
 const fs = require("fs");
 const path = require("path");
 
-const { DEFAULTS } = require("../constants/store");
+const { DEFAULTS, PRE_RESTORE_MODES } = require("../constants/store");
 const { PLUGIN } = require("../constants/plugin");
+
+const normalizePreRestoreMode = (value, fallback) => {
+  if (value === true || value === "true") return "full";
+  if (value === false || value === "false") return "off";
+  if (typeof value === "string" && PRE_RESTORE_MODES.includes(value)) return value;
+  return fallback;
+};
 
 const storeDir = () => strapi.plugin(PLUGIN).service("backupService").backupDir();
 
@@ -51,7 +58,9 @@ const mergePatch = (current, patch) => ({
 
   autoExcludeFiles: pickBool(patch, "autoExcludeFiles", current),
   adoptOrphans: pickBool(patch, "adoptOrphans", current),
-  preRestoreSnapshot: pickBool(patch, "preRestoreSnapshot", current),
+  preRestoreSnapshot: patch.preRestoreSnapshot === undefined
+    ? normalizePreRestoreMode(current.preRestoreSnapshot, "full")
+    : normalizePreRestoreMode(patch.preRestoreSnapshot, normalizePreRestoreMode(current.preRestoreSnapshot, "full")),
   transferRecipients: Array.isArray(patch.transferRecipients)
     ? patch.transferRecipients
     : (Array.isArray(current.transferRecipients) ? current.transferRecipients : []),

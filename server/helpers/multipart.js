@@ -4,7 +4,8 @@ const fs = require("fs");
 
 const pickMultipartFile = (ctx) => {
   const files = ctx.request.files || {};
-  return files.file || Object.values(files)[0];
+  const picked = files.file || Object.values(files)[0];
+  return Array.isArray(picked) ? picked[0] : picked;
 };
 
 const readableUploadPath = (file) => {

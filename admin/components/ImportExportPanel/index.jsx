@@ -14,6 +14,7 @@ import ExportCard from "./ExportCard";
 import UploadDropzone from "./UploadDropzone";
 import BackupTable from "./BackupTable";
 import FullSeedCard from "./FullSeedCard";
+import OrphanCard from "./OrphanCard";
 import ConfirmDialog from "./ConfirmDialog";
 import SchemaConfirmDialog from "./SchemaConfirmDialog";
 import TransferDialog from "./TransferDialog";
@@ -21,7 +22,6 @@ import { deleteAction, restoreAction, downloadAction, stageUpload, importUpload 
 
 const ImportExportPanel = () => {
   const { toggleNotification } = useNotification();
-  const { runningJobs, refresh: refreshRunningJobs } = useRunningJobs();
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +37,8 @@ const ImportExportPanel = () => {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadKey, setUploadKey] = useState("");
   const [uploadProgress, setUploadProgress] = useState(null);
+
+  const { runningJobs, refresh: refreshRunningJobs } = useRunningJobs({ paused: uploadProgress !== null });
   const [dragOver, setDragOver] = useState(false);
   const [limits, setLimits] = useState({ maxFileSize: 0, busy: false, maxFileSizeLabel: "" });
 
@@ -207,7 +209,8 @@ const ImportExportPanel = () => {
       const res = await importUpload(uploadFile, uploadKey, scopeOpts, {
         notify,
         reload,
-        onUploadProgress: (loaded, total) => setUploadProgress({ loaded, total }),
+        onUploadProgress: (loaded, total) => setUploadProgress({ loaded, total, stage: "uploading" }),
+        onStage: (stage) => setUploadProgress((prev) => ({ ...(prev || {}), stage })),
       });
       setUploadProgress(null);
       const pending = applyRestoreResponse(res, res.stagedFile, options);
@@ -273,6 +276,10 @@ const ImportExportPanel = () => {
             refreshRunningJobs();
           }}
         />
+      </Box>
+
+      <Box paddingBottom={5}>
+        <OrphanCard notify={notify} />
       </Box>
 
       <BackupTable

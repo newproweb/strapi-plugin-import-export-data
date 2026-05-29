@@ -5,6 +5,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const { appRoot } = require("../utils/fs");
+const { safeLog, safeInfo } = require("../utils/log");
 const { CLI_TIMEOUT_MS } = require("../constants/backup");
 
 const resolveStrapiBin = () => {
@@ -21,21 +22,11 @@ const resolveStrapiBin = () => {
 };
 
 const emitLine = (stream, line, onLog) => {
-  // setInterval-driven heartbeats and child stdio chunks may arrive while
-  // `strapi develop` is mid-reload — guard the global access so a transient
-  // ReferenceError can't kill the parent process.
-  try {
-    if (typeof strapi !== "undefined" && strapi?.log) {
-      const log = stream === "stdout" ? strapi.log.info : strapi.log.warn;
-      log.call(strapi.log, `[strapi-cli] ${line}`);
-    }
-  } catch { /* ignore */ }
+  safeLog(stream === "stdout" ? "info" : "warn", `[strapi-cli] ${line}`);
   if (!onLog) return;
   try {
     onLog({ stream, line });
-  } catch {
-    // ignore sink errors
-  }
+  } catch { /* ignore sink errors */ }
 };
 
 const streamChunk = (buf, stream, onLog, sink, state) => {
@@ -52,6 +43,32 @@ const streamChunk = (buf, stream, onLog, sink, state) => {
 
 const HEARTBEAT_MS = 30 * 1000;
 const ABORT_POLL_MS = 2 * 1000;
+const SIGTERM_GRACE_MS = 8 * 1000;
+
+const activeChildren = new Set();
+
+/**
+ * Politely terminates a child. Tries SIGTERM first so Postgres can roll back
+ * any in-flight transaction cleanly, then escalates to SIGKILL after a
+ * `SIGTERM_GRACE_MS` window if the child has not exited. No-op when the
+ * child is already gone.
+ */
+const gracefulKill = (child) => {
+  if (!child || child.killed || child.exitCode !== null) return;
+  try { child.kill("SIGTERM"); } catch { /* noop */ }
+  setTimeout(() => {
+    if (!child.killed && child.exitCode === null) {
+      try { child.kill("SIGKILL"); } catch { /* noop */ }
+    }
+  }, SIGTERM_GRACE_MS).unref();
+};
+
+/**
+ * Returns the set of CLI child processes the plugin currently owns. Used by
+ * the destroy lifecycle to terminate them on `strapi develop` reload so they
+ * do not outlive their parent.
+ */
+const getActiveChildren = () => activeChildren;
 
 const emitHeartbeat = (child, state, onLog) => {
   if (!child || child.killed || child.exitCode !== null) return;
@@ -66,11 +83,7 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog, shouldAbort } =
   new Promise((resolve, reject) => {
     const { cmd, baseArgs } = resolveStrapiBin();
     const fullArgs = [...baseArgs, ...args];
-    try {
-      if (typeof strapi !== "undefined" && strapi?.log?.info) {
-        strapi.log.info(`[import-export] spawning: ${cmd} ${fullArgs.join(" ")}`);
-      }
-    } catch { /* ignore */ }
+    safeInfo(`[import-export] spawning: ${cmd} ${fullArgs.join(" ")}`);
 
     // The child CLI re-bootstraps a full Strapi instance before running the
     // import/export. Two env overrides matter:
@@ -82,6 +95,10 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog, shouldAbort } =
     //     short-lived import/export process. Otherwise seeds insert rows
     //     that don't belong in the source archive — turning a clean restore
     //     into a partially polluted DB on cross-server imports.
+    const existingNodeOptions = process.env.NODE_OPTIONS || "";
+    const heapFlag = /--max-old-space-size/.test(existingNodeOptions) ? "" : "--max-old-space-size=4096";
+    const childNodeOptions = [existingNodeOptions, heapFlag].filter(Boolean).join(" ");
+
     const child = spawn(cmd, fullArgs, {
       cwd: appRoot(),
       env: {
@@ -89,6 +106,7 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog, shouldAbort } =
         STRAPI_TELEMETRY_DISABLED: "true",
         NODE_ENV: "production",
         TESTING_MODE: "false",
+        NODE_OPTIONS: childNodeOptions,
       },
       stdio: ["pipe", "pipe", "pipe"],
       shell: process.platform === "win32",
@@ -114,16 +132,15 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog, shouldAbort } =
     const state = { last: "", lastAt: Date.now(), startedAt: Date.now() };
 
     let aborted = false;
+    activeChildren.add(child);
 
     const timer = setTimeout(() => {
-      try { child.kill("SIGKILL"); } catch { /* noop */ }
+      gracefulKill(child);
       reject(new Error(`strapi ${args[0]} timed out after ${Math.round(timeoutMs / 1000)}s`));
     }, timeoutMs);
 
     const heartbeat = setInterval(() => emitHeartbeat(child, state, onLog), HEARTBEAT_MS);
 
-    // Abort poll — the running job exposes `shouldAbort()`; when it flips true
-    // the CLI child is killed and the run rejects with a clear abort error.
     const abortPoll = shouldAbort
       ? setInterval(() => {
           let stop = false;
@@ -131,7 +148,7 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog, shouldAbort } =
           if (!stop) return;
           aborted = true;
           emitLine("stdout", "[abort] abort requested — terminating the strapi CLI…", onLog);
-          try { child.kill("SIGKILL"); } catch { /* noop */ }
+          gracefulKill(child);
         }, ABORT_POLL_MS)
       : null;
 
@@ -139,6 +156,7 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog, shouldAbort } =
       clearTimeout(timer);
       clearInterval(heartbeat);
       if (abortPoll) clearInterval(abortPoll);
+      activeChildren.delete(child);
     };
 
     child.stdout.on("data", (buf) => streamChunk(buf, "stdout", onLog, sink, state));
@@ -164,4 +182,4 @@ const runStrapiCli = (args, { timeoutMs = CLI_TIMEOUT_MS, onLog, shouldAbort } =
     });
   });
 
-module.exports = { resolveStrapiBin, runStrapiCli };
+module.exports = { resolveStrapiBin, runStrapiCli, getActiveChildren, gracefulKill };

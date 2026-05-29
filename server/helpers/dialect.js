@@ -1,5 +1,7 @@
 "use strict";
 
+const { safeWarn } = require("../utils/log");
+
 const CHUNK = 80;
 
 // Returns the active Knex connection, or null when the parent Strapi instance
@@ -20,12 +22,6 @@ const dialect = (db) => String(db?.client?.config?.client || "").toLowerCase();
 const isPg = (d) => d.includes("pg") || d.includes("postgres");
 const isMysql = (d) => d.includes("mysql");
 const isSqlite = (d) => d.includes("sqlite");
-
-const safeWarn = (msg) => {
-  try {
-    if (typeof strapi !== "undefined" && strapi?.log?.warn) strapi.log.warn(msg);
-  } catch { /* ignore — strapi global may be undefined mid-reload */ }
-};
 
 const setFkEnabled = async (db, enabled) => {
   const d = dialect(db);
@@ -52,12 +48,20 @@ const resetPgSequenceForId = async (db, table) => {
   }
 };
 
+/**
+ * Wipes `table` and re-inserts `rows` in chunks INSIDE a single transaction so
+ * a mid-process kill (SIGKILL on abort, host OOM) can never leave the table
+ * empty. Postgres/MySQL roll back on connection drop; SQLite commits only on
+ * COMMIT. Sequence reset is best-effort after the txn commits (Postgres only).
+ */
 const wipeAndInsert = async (db, table, rows) => {
-  await db(table).del();
-  if (!rows || rows.length === 0) return;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    await db(table).insert(rows.slice(i, i + CHUNK));
-  }
+  await db.transaction(async (trx) => {
+    await trx(table).del();
+    if (!rows || rows.length === 0) return;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      await trx(table).insert(rows.slice(i, i + CHUNK));
+    }
+  });
   await resetPgSequenceForId(db, table);
 };
 

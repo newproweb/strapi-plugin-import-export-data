@@ -12,13 +12,15 @@ import EncryptionSection from "./EncryptionSection";
 import TransferSection from "./TransferSection";
 import LastRunBox from "./LastRunBox";
 
+const VALID_MODES = ["full", "db-only", "off"];
+
 const buildPayload = (cfg) => {
   const payload = {
     backupSchedule: cfg.backupSchedule || "",
     retention: cfg.retention,
     autoExcludeFiles: cfg.autoExcludeFiles,
     adoptOrphans: Boolean(cfg.adoptOrphans),
-    preRestoreSnapshot: cfg.preRestoreSnapshot !== false,
+    preRestoreSnapshot: VALID_MODES.includes(cfg.preRestoreSnapshot) ? cfg.preRestoreSnapshot : "full",
     transferRecipients: cfg.transferRecipients,
   };
 
@@ -98,9 +100,9 @@ const SettingsPanel = () => {
       <LastRunBox lastBackupAt={cfg.lastBackupAt} />
       <Flex gap={2} justifyContent="flex-end" paddingTop={4} paddingBottom={4}>
         <Button variant="secondary" onClick={onRunNow} loading={running} startIcon={<Play />}>
-          Run now
+          Run Manual Backup
         </Button>
-        <Button onClick={onSave} loading={saving}>Save settings</Button>
+        <Button onClick={onSave} loading={saving}>Save Configuration</Button>
       </Flex>
     </Box>
   );

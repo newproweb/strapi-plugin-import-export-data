@@ -13,11 +13,14 @@ const isVisible = () =>
  * it right after starting a new job so the RunningJobsBanner shows up without
  * waiting for the 20s idle interval.
  */
-export const useRunningJobs = () => {
+export const useRunningJobs = ({ paused = false } = {}) => {
   const [runningJobs, setRunningJobs] = useState([]);
   const timerRef = useRef(null);
   const runningCountRef = useRef(0);
   const pumpRef = useRef(null);
+  const pausedRef = useRef(paused);
+
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +36,7 @@ export const useRunningJobs = () => {
 
     const pump = async () => {
       if (cancelled || authLost) return;
+      if (pausedRef.current) return schedule();
       if (!isVisible()) return schedule();
 
       try {
@@ -74,6 +78,7 @@ export const useRunningJobs = () => {
   }, []);
 
   const refresh = useCallback(() => {
+    if (pausedRef.current) return;
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;

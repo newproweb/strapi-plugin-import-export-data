@@ -3,6 +3,7 @@
 const fs = require("fs");
 
 const { services } = require("../helpers/plugin-services");
+const { tusFilePath, removeTusInfo } = require("../helpers/tus-server");
 const { errorBody, pickStatus } = require("../utils/errors");
 const { pickMultipartFile, readableUploadPath, uploadOriginalName } = require("../helpers/multipart");
 const { pickDownloadMime } = require("../helpers/mime");
@@ -15,6 +16,7 @@ const {
 const { readStrapiBodyLimit, formatBytes } = require("../helpers/body-limit");
 const { isBusy, currentLabel, current } = require("../helpers/job-mutex");
 const { resolveTransfer, transferBackup } = require("../helpers/transfer");
+const { adoptOrphanUploads, diagnoseOrphanUploads } = require("../helpers/orphan-adopt");
 
 const fail = (ctx, status, error, fallback) => {
   ctx.status = status;
@@ -51,7 +53,7 @@ module.exports = ({ strapi }) => ({
     let stats;
     try {
       filePath = services().backup.getBackupPath(ctx.params.file);
-      stats = fs.statSync(filePath);
+      stats = await fs.promises.stat(filePath);
     } catch (error) {
       ctx.status = 404;
       ctx.body = {
@@ -100,7 +102,7 @@ module.exports = ({ strapi }) => ({
     let stats;
     try {
       filePath = services().backup.getBackupPath(resolved.file);
-      stats = fs.statSync(filePath);
+      stats = await fs.promises.stat(filePath);
     } catch {
       ctx.status = 404;
       ctx.body = { error: { status: 404, name: "BackupNotFound", message: "The shared archive is no longer available." } };
@@ -133,7 +135,7 @@ module.exports = ({ strapi }) => ({
       if (body.useSettingsRecipients && Array.isArray(cfg.transferRecipients)) {
         recipients.push(...cfg.transferRecipients);
       }
-      const baseUrl = ctx.request.origin || strapi.config.get("server.url") || "";
+      const baseUrl = strapi.config.get("server.url") || "";
       const result = await transferBackup({ fileName: ctx.params.file, recipients, baseUrl });
       ctx.body = { data: result };
     } catch (error) {
@@ -236,9 +238,10 @@ module.exports = ({ strapi }) => ({
     const tmpPath = readableUploadPath(file);
     if (!tmpPath) return ctx.throw(400, "uploaded file not readable");
 
-    const fileSize = Number(file.size) || 0;
+    const declaredSize = Number(file.size);
+    const fileSize = Number.isFinite(declaredSize) && declaredSize > 0 ? declaredSize : null;
     const max = readStrapiBodyLimit();
-    if (fileSize > max) {
+    if (fileSize !== null && fileSize > max) {
       ctx.status = 413;
       ctx.body = {
         error: {
@@ -253,12 +256,32 @@ module.exports = ({ strapi }) => ({
     }
 
     try {
-      const staged = services().backup.stageUploadedArchive(tmpPath, uploadOriginalName(file));
+      const staged = await services().backup.stageUploadedArchive(tmpPath, uploadOriginalName(file));
       strapi.log.info(`[import-export] staged uploaded archive: ${staged.file}`);
       ctx.body = { data: { ...staged, restored: false } };
     } catch (error) {
       strapi.log.error("[import-export:backup.upload]", error);
       fail(ctx, 500, error, "Upload failed");
+    }
+  },
+
+  async tusFinalize(ctx) {
+    const { id } = ctx.params;
+    const { fileName } = ctx.request.body || {};
+    if (!id) return ctx.throw(400, "tus upload id is required");
+    if (!fileName) return ctx.throw(400, "fileName is required");
+
+    const srcPath = tusFilePath(id);
+    if (!fs.existsSync(srcPath)) return ctx.throw(404, `Tus upload not found: ${id}`);
+
+    try {
+      const staged = await services().backup.stageExternalFile(srcPath, fileName);
+      await removeTusInfo(id);
+      strapi.log.info(`[import-export] tus upload staged: ${staged.file}`);
+      ctx.body = { data: { ...staged, restored: false } };
+    } catch (error) {
+      strapi.log.error("[import-export:backup.tusFinalize]", error);
+      fail(ctx, 500, error, "Tus finalize failed");
     }
   },
 
@@ -345,5 +368,29 @@ module.exports = ({ strapi }) => ({
   async clearFullSeed(ctx) {
     clearPendingSeed();
     ctx.body = { data: { ok: true } };
+  },
+
+  async diagnoseOrphans(ctx) {
+    try {
+      ctx.body = { data: await diagnoseOrphanUploads() };
+    } catch (error) {
+      strapi.log.error("[import-export:orphans.diagnose]", error);
+      fail(ctx, 500, error, "Could not diagnose orphan files");
+    }
+  },
+
+  async adoptOrphans(ctx) {
+    try {
+      const lines = [];
+      const adopted = await adoptOrphanUploads((line) => {
+        lines.push(line);
+        strapi.log.info(`[import-export] ${line}`);
+      });
+      const diag = await diagnoseOrphanUploads();
+      ctx.body = { data: { adopted, log: lines, after: diag } };
+    } catch (error) {
+      strapi.log.error("[import-export:orphans.adopt]", error);
+      fail(ctx, 500, error, "Could not adopt orphan files");
+    }
   },
 });

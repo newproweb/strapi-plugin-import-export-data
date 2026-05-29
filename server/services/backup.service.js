@@ -13,7 +13,7 @@ const { assertDevConfig } = require("../helpers/dev-config-check");
 const { padMissingUploadFiles, cleanupPaddedFiles, summarizeUploads } = require("../helpers/uploads");
 const { adoptOrphanUploads } = require("../helpers/orphan-adopt");
 const { emitExportDiagnostics } = require("../helpers/diagnostics");
-const { listBackups, getBackupPath, deleteBackup, stageUploadedArchive, pruneOldBackups } = require("../helpers/archives");
+const { listBackups, getBackupPath, deleteBackup, stageUploadedArchive, stageExternalFile, pruneOldBackups } = require("../helpers/archives");
 const { sanitizePrefix, buildExportArgs, buildImportArgs } = require("../helpers/cli-args");
 const { makeLogEmitter } = require("../helpers/emitter");
 const { describeArchive } = require("../helpers/archive-describe");
@@ -23,7 +23,37 @@ const { autoSendPreRestore } = require("../helpers/transfer");
 const { validateArchive } = require("../helpers/archive-validate");
 const { assertSizeWithinLimit } = require("../helpers/body-limit");
 const { startAssetProgressMonitor } = require("../helpers/asset-progress-monitor");
+const { extractAssetsFromArchive } = require("../helpers/parallel-assets");
 const { JOB_TYPES } = require("../constants/jobs");
+
+const appendExclude = (exclude, addition) => {
+  const current = String(exclude || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!current.includes(addition)) current.push(addition);
+  return current.join(",");
+};
+
+const preExtractAssetsIfApplicable = async ({ filePath, exclude, only, emit, onLog, setStage }) => {
+  const excludesFiles = /\bfiles\b/.test(String(exclude || ""));
+  const onlyExcludesAssets = String(only || "").trim() && !/\bfiles\b/.test(String(only));
+  const isEncrypted = filePath.toLowerCase().endsWith(".enc");
+
+  emit(`[parallel-assets] check: exclude="${exclude || ""}", only="${only || ""}", encrypted=${isEncrypted}, willPreExtract=${!(excludesFiles || onlyExcludesAssets || isEncrypted)}`);
+
+  if (excludesFiles || onlyExcludesAssets || isEncrypted) return { applied: false, stats: null };
+
+  setStage?.("Extracting assets in parallel…", 15);
+  emit("[parallel-assets] pre-extracting uploads/* in parallel (16 workers)");
+  const stats = await extractAssetsFromArchive(filePath, { onLog }).catch((err) => {
+    emit(`[parallel-assets] failed (${err.message}) — falling back to CLI default assets handling`);
+    return null;
+  });
+  if (!stats || stats.skipped) return { applied: false, stats };
+
+  const mb = (stats.bytes / (1024 * 1024)).toFixed(1);
+  const sec = (stats.durationMs / 1000).toFixed(1);
+  emit(`[parallel-assets] done — ${stats.extracted} file(s), ${mb} MB in ${sec}s — Strapi CLI will skip assets`);
+  return { applied: true, stats };
+};
 
 const assertArchiveExists = (archivePath, basePath) => {
   if (!archivePath || !fs.existsSync(archivePath)) {
@@ -53,7 +83,7 @@ const createBackup = async ({ encrypt = false, key, compress = true, exclude, pr
   try {
     result = await runStrapiCli(buildExportArgs({ basePath, encrypt, key, compress, exclude }), { onLog, shouldAbort });
   } finally {
-    cleanupPaddedFiles(padded, emit);
+    await cleanupPaddedFiles(padded, emit);
   }
 
   const archivePath = resolveExportedPath(basePath, { encrypt, compress });
@@ -168,30 +198,47 @@ const restoreBackup = async (
   const snapshot = preserveAuth ? await takeAuthSnapshot(emit) : null;
   const patcher = startLiveAuthPatcher(snapshot, emit);
   const started = Date.now();
-  const excludesFiles = /\bfiles\b/.test(String(exclude || ""));
+
+  const parallelAssets = await preExtractAssetsIfApplicable({ filePath, exclude, only, emit, onLog, setStage });
+  const effectiveExclude = parallelAssets.applied ? appendExclude(exclude, "files") : exclude;
+
+  const excludesFiles = /\bfiles\b/.test(String(effectiveExclude || ""));
   const monitor = excludesFiles ? null : startAssetProgressMonitor(emit);
 
   setStage?.("Importing data…", 30);
 
-  let cliError;
-  let result;
-  try {
-    result = await runStrapiCli(buildImportArgs({ filePath, key, exclude, only }), { onLog, shouldAbort });
-  } catch (err) {
-    cliError = err;
-    emit(`[safeguard] import CLI failed: ${err.message}`);
-    patcher.stop();
+  const result = await runStrapiCli(
+    buildImportArgs({ filePath, key, exclude: effectiveExclude, only }),
+    { onLog, shouldAbort },
+  ).catch((err) => ({ _cliError: err }));
+
+  const cliError = result?._cliError;
+  let rollback = null;
+  if (cliError) {
+    emit(`[safeguard] import CLI failed: ${cliError.message}`);
+    await patcher.stop();
     if (preSnapshot) {
-      await autoRollbackFromSnapshot(preSnapshot, emit, onLog);
+      rollback = await autoRollbackFromSnapshot(preSnapshot, emit, onLog);
     } else {
       emit("[safeguard] WARNING: no pre-snapshot available — DB may be in a partial state, manual recovery needed");
     }
   }
 
-  patcher.stop();
-  if (monitor) monitor.stop();
-  if (snapshot) await replayAuthSnapshot(snapshot, emit);
-  if (cliError) throw cliError;
+  await patcher.stop();
+  if (monitor) await monitor.stop();
+  if (snapshot) await replayAuthSnapshot(snapshot, emit).catch((err) => { throw err; });
+
+  if (cliError) {
+    if (rollback && rollback.rolledBack === false && rollback.reason === "rollback-failed") {
+      const tail = rollback.emailed
+        ? " — snapshot link emailed to operators for manual recovery"
+        : " — manual recovery from the pre-restore snapshot is required";
+      const combined = new Error(`${cliError.message}; rollback also failed (${rollback.error?.message || "unknown"})${tail}`);
+      combined.cause = cliError;
+      throw combined;
+    }
+    throw cliError;
+  }
 
   return {
     file: fileName,
@@ -230,5 +277,6 @@ module.exports = () => ({
   deleteBackup,
   getBackupPath,
   stageUploadedArchive,
+  stageExternalFile,
   pruneOldBackups,
 });

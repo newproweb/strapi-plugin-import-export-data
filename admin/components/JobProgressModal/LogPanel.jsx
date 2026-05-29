@@ -20,6 +20,12 @@ const LINE_STYLE = {
 
 const colorFor = (stream) => (stream === "stderr" ? "#ff9d9d" : "#c8f6c8");
 
+const stableKey = (line, fallbackIndex) => {
+  if (line?.seq !== undefined) return `seq-${line.seq}`;
+  if (line?.at !== undefined) return `at-${line.at}-${fallbackIndex}`;
+  return `idx-${fallbackIndex}`;
+};
+
 const LogPanel = ({ lines = [] }) => {
   const ref = useRef(null);
 
@@ -30,9 +36,9 @@ const LogPanel = ({ lines = [] }) => {
   return (
     <div ref={ref} style={LOG_STYLE}>
       {lines.length === 0 && <div style={{ color: "#888" }}>Waiting for CLI output…</div>}
-      {lines.map((l, i) => (
-        <div key={i} style={{ ...LINE_STYLE, color: colorFor(l.stream) }}>
-          {l.line}
+      {lines.map((line, i) => (
+        <div key={stableKey(line, i)} style={{ ...LINE_STYLE, color: colorFor(line.stream) }}>
+          {line.line}
         </div>
       ))}
     </div>

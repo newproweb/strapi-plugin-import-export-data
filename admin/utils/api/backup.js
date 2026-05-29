@@ -1,8 +1,11 @@
 import { getFetchClient } from "@strapi/strapi/admin";
 
 import { basePath, getBackendUrl, readAuthToken } from "./client";
+import { uploadBackupTus } from "./tus-uploader";
 
 const encoded = (file) => encodeURIComponent(file);
+
+const TUS_THRESHOLD = 16 * 1024 * 1024;
 
 export const listBackups = async () => {
   const { get } = getFetchClient();
@@ -68,7 +71,14 @@ export const downloadBackup = async (file, onProgress) => {
   return { data: new Blob(chunks) };
 };
 
-export const uploadBackup = async (file, { key = "", onProgress } = {}) => {
+export { uploadBackupTus };
+
+export const uploadBackup = async (file, { key = "", onProgress, useTus, chunkSize } = {}) => {
+  const shouldTus = useTus === true || (useTus !== false && file.size > TUS_THRESHOLD);
+  if (shouldTus) {
+    return uploadBackupTus(file, { key, onProgress, chunkSize });
+  }
+
   const form = new FormData();
   form.append("file", file);
   if (key) form.append("key", key);
@@ -141,4 +151,16 @@ export const getFullSeedPending = async () => {
 export const clearFullSeedPending = async () => {
   const { del } = getFetchClient();
   await del(`${basePath}/full-seed/pending`);
+};
+
+export const diagnoseOrphans = async () => {
+  const { get } = getFetchClient();
+  const { data } = await get(`${basePath}/orphans/diagnose`);
+  return data?.data ?? null;
+};
+
+export const adoptOrphans = async () => {
+  const { post } = getFetchClient();
+  const { data } = await post(`${basePath}/orphans/adopt`, {});
+  return data?.data ?? null;
 };

@@ -20,6 +20,16 @@ const ensureBackupDir = () => {
 
 const isoSlug = () => new Date().toISOString().replace(/[:.]/g, "-");
 
+const atomicMove = async (src, dest) => {
+  try {
+    await fs.promises.rename(src, dest);
+  } catch (err) {
+    if (err.code !== "EXDEV") throw err;
+    await fs.promises.copyFile(src, dest);
+    await fs.promises.unlink(src).catch(() => {});
+  }
+};
+
 const pickCandidate = (basePath, { encrypt, compress }) => {
   if (!compress && !encrypt) return `${basePath}.tar`;
   if (compress && !encrypt) return `${basePath}.tar.gz`;
@@ -43,5 +53,6 @@ module.exports = {
   backupDir,
   ensureBackupDir,
   isoSlug,
+  atomicMove,
   resolveExportedPath,
 };

@@ -3,11 +3,14 @@
 const fs = require("fs");
 const path = require("path");
 
+const { invalidateListCache } = require("./archives");
+
 const archiveCreatedAt = (stats) =>
   new Date(stats.birthtimeMs || stats.mtimeMs || Date.now()).toISOString();
 
 const describeArchive = ({ archivePath, id, started, paddedCount, cliStdout }) => {
   const stats = fs.statSync(archivePath);
+  invalidateListCache();
   return {
     id,
     file: path.basename(archivePath),

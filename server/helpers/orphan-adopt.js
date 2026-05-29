@@ -169,4 +169,43 @@ const adoptOrphanUploads = async (emit) => {
   return adopted;
 };
 
-module.exports = { adoptOrphanUploads };
+/**
+ * Counts orphan files on disk without writing anything to the DB. Used by the
+ * diagnose endpoint to preview how many rows the next `adoptOrphanUploads`
+ * call would insert. Variant thumbnails (`thumbnail_`, `small_`, ...) are
+ * excluded because they belong to a parent upload row.
+ */
+const diagnoseOrphanUploads = async () => {
+  const dir = uploadsDir();
+  if (!fs.existsSync(dir)) return { dir, exists: false, dbRows: 0, diskFiles: 0, variants: 0, orphans: 0 };
+
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const batch = await strapi.db.query("plugin::upload.file").findMany({
+      limit: PAGE_SIZE,
+      offset,
+      orderBy: { id: "asc" },
+    });
+    if (!batch || batch.length === 0) break;
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+
+  const known = collectKnownBasenames(rows);
+  const files = listUploadedFiles(dir);
+  const variants = files.filter(isVariantName).length;
+  const orphans = files.filter((name) => !isVariantName(name) && !known.has(name)).length;
+
+  return {
+    dir,
+    exists: true,
+    dbRows: rows.length,
+    diskFiles: files.length,
+    variants,
+    orphans,
+  };
+};
+
+module.exports = { adoptOrphanUploads, diagnoseOrphanUploads };

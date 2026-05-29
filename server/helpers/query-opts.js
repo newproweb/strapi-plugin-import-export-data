@@ -42,14 +42,16 @@ const buildBackupCreateOpts = (body, cfg) => {
 
 /**
  * Resolves the pre-restore snapshot mode from the request body, falling back
- * to the saved config. Accepts the legacy boolean (true → "full", false →
- * "off") plus the explicit "db-only" mode that skips the asset re-export.
+ * to the saved config. Boolean `true` (legacy UI switch) maps to "full" so
+ * the rollback covers media too — losing assets on rollback was a real risk
+ * with the previous default. Explicit "db-only" is still honored when the
+ * caller opts into the faster snapshot path.
  */
 const resolveSnapshotMode = (body, cfg) => {
   const raw = body.preRestoreSnapshot !== undefined ? body.preRestoreSnapshot : cfg.preRestoreSnapshot;
   if (raw === false || raw === "false" || raw === "off") return "off";
-  if (raw === "full") return "full";
-  return "db-only";
+  if (raw === "db-only") return "db-only";
+  return "full";
 };
 
 const buildRestoreOpts = (body, cfg) => ({
