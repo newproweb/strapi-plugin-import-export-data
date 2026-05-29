@@ -1,4 +1,4 @@
-import * as tus from "tus-js-client";
+import * as tus from "tus-js-client/dist/tus.js";
 
 import { basePath, getBackendUrl, readAuthToken } from "./client";
 
