@@ -128,6 +128,30 @@ const matchAssetMonitorProgress = (job, line) => {
   return true;
 };
 
+// Strapi's transfer engine can spend many minutes inside a single stage (a
+// large `entities` insert, or the `links` pass) without printing a line, so
+// the percent would otherwise sit frozen at the last stage boundary — e.g.
+// 60% once `links` is done — while only the elapsed clock keeps ticking.
+// `cli.js` emits a `[heartbeat]` line every 30s while the CLI is alive but
+// silent; we use it to creep the bar toward the next stage boundary (never
+// crossing it, so the real `✔ <stage>` line still registers the jump) so the
+// operator can see the job is still progressing rather than hung.
+const HEARTBEAT_CREEP_FRACTION = 0.12;
+
+const matchHeartbeat = (job, line) => {
+  if (!/^\[heartbeat\]/.test(line)) return false;
+  const stageSpan = 100 / KNOWN_STAGES.length;
+  const ceiling = Math.min(99, (job.stagesDone.length + 1) * stageSpan - 1);
+  const current = job.progress?.percent || 0;
+  if (current >= ceiling) return true;
+  const step = Math.max(1, Math.round((ceiling - current) * HEARTBEAT_CREEP_FRACTION));
+  job.progress = {
+    percent: Math.min(ceiling, current + step),
+    stage: job.progress?.stage || "",
+  };
+  return true;
+};
+
 const updateProgressFromLine = (job, line) => {
   if (!Array.isArray(job.stagesDone)) job.stagesDone = [];
   if (matchPercent(job, line)) return;
@@ -135,6 +159,7 @@ const updateProgressFromLine = (job, line) => {
   if (matchStageProgress(job, line)) return;
   if (matchStageStarted(job, line)) return;
   if (matchAssetMonitorProgress(job, line)) return;
+  if (matchHeartbeat(job, line)) return;
   matchCompletion(job, line);
 };
 

@@ -1,4 +1,4 @@
-import * as tus from "tus-js-client/dist/tus.js";
+import { Upload } from "tus-js-client";
 
 import { basePath, getBackendUrl, readAuthToken } from "./client";
 
@@ -47,7 +47,7 @@ export const uploadBackupTus = (file, {
   const endpoint = `${getBackendUrl()}${basePath}/backup/upload/tus`;
   const authHeader = buildAuthHeader();
 
-  const upload = new tus.Upload(file, {
+  const upload = new Upload(file, {
     endpoint,
     headers: authHeader,
     chunkSize,
