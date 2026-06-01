@@ -23,14 +23,14 @@ const tusFilePath = (uploadId) => path.join(ensureTusDir(), uploadId);
 
 const tusInfoPath = (uploadId) => `${tusFilePath(uploadId)}.json`;
 
-const removeTusInfo = (uploadId) =>
-  fs.promises.unlink(tusInfoPath(uploadId)).catch(() => {});
+const removeTusInfo = (uploadId) => fs.promises.unlink(tusInfoPath(uploadId)).catch(() => { });
 
 const getTusServer = () => {
   if (_server) return _server;
   _server = new Server({
     path: TUS_PATH,
     datastore: new FileStore({ directory: ensureTusDir() }),
+    relativeLocation: true,
     respectForwardedHeaders: true,
   });
   return _server;
